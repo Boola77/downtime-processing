@@ -140,10 +140,9 @@ if st.session_state.df_model is not None:
 
     if minesite_model:
 
-        BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         
-        browser_path = (os.path.join(BASE_DIR, "data",
-            f"Equipments/{minesite_model}.csv"
+        browser_path = (os.path.join(BASE_DIR, "data/Equipments/{minesite_model}.csv"
         ))
         df_browser_model = pd.read_csv(
             browser_path,
@@ -157,11 +156,11 @@ if st.session_state.df_model is not None:
 
         if "template_path_model" not in st.session_state:
             st.session_state.template_path_model = \
-                (os.path.join(BASE_DIR, "data", "template/Template.xlsx"))
+                (os.path.join(BASE_DIR, "data/template/Template.xlsx"))
         
         if "trainer_path_model" not in st.session_state:
             st.session_state.trainer_path_model = \
-                (os.path.join(BASE_DIR, "data", "model/"))
+                (os.path.join(BASE_DIR, "data/model"))
             
         st.subheader("🗳️ Editable Table")
 
