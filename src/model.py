@@ -143,7 +143,11 @@ if st.session_state.df_model is not None:
             r"C:\Users\BOOLA\Desktop\Process_project\data\Equipments"
             + f"\\{minesite_model}.csv"
         )
-        df_browser_model = pd.read_csv(browser_path)
+        df_browser_model = pd.read_csv(
+            browser_path,
+            sep= None,
+            engine= 'python'
+        )
         st.session_state.df_browser_model = df_browser_model
 
         if "browser_path_model" not in st.session_state:

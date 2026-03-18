@@ -11,7 +11,7 @@ from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from backend.fetch_data import fetch_data, DatasetType
 from backend.packages.filtering import *
 from backend.errors_handling import errors_handling
-from backend.predict.predict import predict
+from backend.predict.predict import *
 from frontend.clean_state import init_state
 
 

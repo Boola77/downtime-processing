@@ -30,7 +30,7 @@ def fetch_data(
 
     # --- Read inputs
     df_source = dataset.copy()
-    df_browser = pd.read_csv(browser_path)
+    df_browser = pd.read_csv(browser_path, sep= None, engine= 'python')
 
     # --- Template
     df = create_template(
