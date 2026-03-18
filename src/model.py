@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import os
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 from frontend.read_files import read_csv_file, read_excel_file
@@ -138,11 +139,12 @@ if st.session_state.df_model is not None:
                                   placeholder= 'Select mine site name')
 
     if minesite_model:
+
+        BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         
-        browser_path = (
-            r"C:\Users\BOOLA\Desktop\Process_project\data\Equipments"
-            + f"\\{minesite_model}.csv"
-        )
+        browser_path = (os.path.join(BASE_DIR, "data",
+            f"Equipments/{minesite_model}.csv"
+        ))
         df_browser_model = pd.read_csv(
             browser_path,
             sep= None,
@@ -155,11 +157,11 @@ if st.session_state.df_model is not None:
 
         if "template_path_model" not in st.session_state:
             st.session_state.template_path_model = \
-                r"C:\Users\BOOLA\Desktop\Process_project\data\template\Template.xlsx"
+                (os.path.join(BASE_DIR, "data", "template/Template.xlsx"))
         
         if "trainer_path_model" not in st.session_state:
             st.session_state.trainer_path_model = \
-                r"C:\Users\BOOLA\Desktop\Process_project\data\model"
+                (os.path.join(BASE_DIR, "data", "model"))
             
         st.subheader("🗳️ Editable Table")
 
