@@ -140,28 +140,35 @@ if st.session_state.df_model is not None:
 
     if minesite_model:
 
-        BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        BASE_DIR = os.getcwd()
         
-        browser_path = (os.path.join(BASE_DIR, "data",
-            f"Equipments/{minesite_model}.csv"
-        ))
-        df_browser_model = pd.read_csv(
-            browser_path,
-            sep= None,
-            engine= 'python'
+        browser_path = os.path.join(
+            BASE_DIR,
+            "data",
+            "Equipments",
+            f"{minesite_model}.csv"
         )
+
+        if not os.path.exists(browser_path):
+            st.error(f"File not found: {browser_path}")
+        else:
+            df_browser_model = pd.read_csv(browser_path, sep=None, engine='python')
+
         st.session_state.df_browser_model = df_browser_model
 
         if "browser_path_model" not in st.session_state:
             st.session_state.browser_path_model = browser_path
 
         if "template_path_model" not in st.session_state:
-            st.session_state.template_path_model = \
-                (os.path.join(BASE_DIR, "data", "template/Template.xlsx"))
+            st.session_state.template_path_model = os.path.join(
+                BASE_DIR,
+                "data",
+                "template",
+                "Template.xlsx"
+            )
         
         if "trainer_path_model" not in st.session_state:
-            st.session_state.trainer_path_model = \
-                (os.path.join(BASE_DIR, "data", "model/"))
+            st.session_state.trainer_path_model = os.path.join(BASE_DIR, "data", "model")
             
         st.subheader("🗳️ Editable Table")
 
