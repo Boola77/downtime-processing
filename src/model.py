@@ -161,7 +161,7 @@ if st.session_state.df_model is not None:
         
         if "trainer_path_model" not in st.session_state:
             st.session_state.trainer_path_model = \
-                (os.path.join(BASE_DIR, "data/model"))
+                (os.path.join(BASE_DIR, "data", "model/"))
             
         st.subheader("🗳️ Editable Table")
 
