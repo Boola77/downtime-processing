@@ -1,2 +1,4 @@
 *.csv filter=lfs diff=lfs merge=lfs -text
 data/model/model.safetensors filter=lfs diff=lfs merge=lfs -text
+data/Equipments/*
+ filter=lfs diff=lfs merge=lfs -text
