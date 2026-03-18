@@ -34,3 +34,6 @@ dist/
 
 # Windows
 Thumbs.db
+
+# Data of AI traine model
+data/model/
