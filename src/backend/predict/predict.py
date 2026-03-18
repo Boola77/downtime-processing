@@ -1,5 +1,6 @@
 # coding:utf-8
 
+import os
 import streamlit as st
 import torch
 import joblib
@@ -17,7 +18,13 @@ model = AutoModelForSequenceClassification.from_pretrained(path_trainer_predict)
 tokenizer = AutoTokenizer.from_pretrained(path_trainer_predict)
 
 # Load LabelEncoder
-label_encoder = joblib.load(path_trainer_predict + "\label_encoder.pkl")
+label_path = os.path.join(path_trainer_predict, "label_encoder.pkl")
+
+@st.cache_resource
+def load_label_encoder():
+    return joblib.load(label_path)
+
+label_encoder = load_label_encoder()
 
 
 # =========== Predidt =========
