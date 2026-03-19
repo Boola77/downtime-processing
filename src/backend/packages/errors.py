@@ -108,20 +108,26 @@ def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
 
     if len(year_month.unique()) == 1:
         month_start = pd.to_datetime(year_month.iloc[0])
-        next_month = month_start + pd.offsets.MonthBegin(1)    
+        next_month = month_start + pd.offsets.MonthBegin(1)
 
+        # Over current month
         mask = df["End Hours"] > next_month
 
         # Extract first and apply reset on Start Hours
         df1 = df.loc[mask].copy()
 
-        # Second part
+        # Focus on current month
+        mask2 = df1['Start Hours'] < next_month
+
+        df1 = df1.loc[mask2].copy()
+        
+        # On second part
         df1["Start Hours"] = next_month
         df1["DowntimeHours"] = (
             df1["End Hours"] - df1["Start Hours"]
         ).dt.total_seconds() / 3600
 
-        # first part
+        # on first part
         df.loc[mask, "End Hours"] = next_month
         df.loc[mask, "DowntimeHours"] = (
             df.loc[mask, "End Hours"] - df.loc[mask, "Start Hours"]

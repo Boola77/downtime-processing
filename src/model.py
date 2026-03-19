@@ -153,7 +153,7 @@ if st.session_state.df_model is not None:
             st.error(f"File not found: {browser_path}")
         else:
             df_browser_model = pd.read_csv(browser_path, sep=None, engine='python')
-
+        
         st.session_state.df_browser_model = df_browser_model
 
         if "browser_path_model" not in st.session_state:
@@ -207,7 +207,7 @@ if st.session_state.df_model is not None:
                 df_missed = df_browser_model[
                     ~df_browser_model['Equipment'].isin(
                         edited_df_model[equipment_model].unique())][[
-                            'Equip Label', 'Model']].reset_index(drop=True)
+                            'Equip Label', 'Model', "SerialNumber", "Parent Product Family"]].reset_index(drop=True)
                 if not df_missed.empty:
                     st.session_state.df_missed = df_missed
 
