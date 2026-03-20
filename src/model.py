@@ -207,7 +207,8 @@ if st.session_state.df_model is not None:
                 df_missed = df_browser_model[
                     ~df_browser_model['Equipment'].isin(
                         edited_df_model[equipment_model].unique())][[
-                            'Equip Label', 'Model']].reset_index(drop=True)
+                            'Equipment', "SerialNumber", 'Model', "Parent Product Family"
+                        ]].reset_index(drop=True)
                 if not df_missed.empty:
                     st.session_state.df_missed = df_missed
 
@@ -215,7 +216,8 @@ if st.session_state.df_model is not None:
                 df_missed = df_browser_model[
                     ~df_browser_model['Equipment'].isin(
                         edited_df_model[equipment_model].unique())][[
-                            'Equipment', 'Model']].reset_index(drop=True)
+                            'Equipment', "SerialNumber", 'Model', "Parent Product Family"
+                        ]].reset_index(drop=True)
                 if not df_missed.empty:
                     st.session_state.df_missed = df_missed            
             
