@@ -15,7 +15,7 @@ def fetch_data(
         dataset_type: DatasetType,
         dataset: pd.DataFrame,
         template_path: str,
-        browser_path: str,
+        df_browser: pd.DataFrame,
         selected_columns: Mapping[str, str | None] | None,
         equip_column: Mapping[str, str],
         site: Mapping[str, str],
@@ -30,7 +30,7 @@ def fetch_data(
 
     # --- Read inputs
     df_source = dataset.copy()
-    df_browser = pd.read_csv(browser_path, sep= None, engine= 'python')
+    df_browser = df_browser.copy()
 
     # --- Template
     df = create_template(
@@ -48,7 +48,7 @@ def fetch_data(
         equip_column
     )
 
-    if downtime:
+    if downtime: 
         df =\
             convert_to_datetime(df, columns=["Start Hours", "End Hours"])
  

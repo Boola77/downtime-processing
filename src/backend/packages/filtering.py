@@ -66,7 +66,7 @@ def filter_existing_equipment(
 
     target, value = next(iter(equip_column.items()))
     
-    # if len(value) != 1:
+    # if len(value) != 1: 
     #     raise ValueError("Expected exactly one equipment name mapping")
 
     mask = df[target].isin(equipment_browser[value].dropna())
@@ -180,8 +180,8 @@ def convert_to_datetime(df, columns):
     pandas.DataFrame
     """
 
-    if isinstance(columns, str):
-        columns = [columns]
+    # if isinstance(columns, str):
+    #     columns = [columns]
 
     df = df.copy()
 
@@ -197,7 +197,7 @@ def convert_to_datetime(df, columns):
 
         # 1️⃣ Try pandas automatic parsing
         try:
-            converted = pd.to_datetime(original_series, errors="raise")
+            converted = pd.to_datetime(original_series, format= 'mixed')
             conversion_success = True
         except Exception:
             pass
@@ -250,7 +250,7 @@ def format_yearmonth_column(df, column="YearMonth"):
 
     df = df.copy()
 
-    series = df[column]
+    series = df[column].astype(str)
     
     try:
         dt_series = pd.to_datetime(series, errors='coerce')

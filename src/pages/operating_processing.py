@@ -1,299 +1,291 @@
 # coding:utf-8
-
 import streamlit as st
 import pandas as pd
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from st_aggrid import AgGrid, GridOptionsBuilder
 
 from backend.fetch_data import fetch_data, DatasetType
-from backend.packages.filtering import *
+from backend.packages.filtering import format_yearmonth_column, BrowserMapping
 from backend.errors_handling import errors_handling
 from frontend.clean_state import init_state
 
 
 
-# ============== PAGE CONFIG ==========================
-st.set_page_config(page_title= "Operating Hours",)
+# =====================================================
+# CONFIG
+# =====================================================
+st.set_page_config(page_title="Operating Hours")
 st.title("Operating Data Processing")
 
+ERROR_ORDER = ['missing_values', 'outliers', 'duplicates', 'Negative_Hours']
 
-# --------- Create file --------------
+
+# =====================================================
+# UTILS
+# =====================================================
 @st.cache_data
-def convert_csv(df):
+def convert_csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False, sep=";").encode("utf-8-sig")
 
 
-# =====================================================
-# VARIABLES ASSIGNING
-# =====================================================
-required_keys = [
-    "equipment", "smu_hours_dialog",
-    "yearmonth_mode_op_hrs_dialog"
-]
+def check_required_keys(keys: list):
+    missing = [k for k in keys if k not in st.session_state]
+    if missing:
+        st.warning(f"Missing required keys: {missing}")
+        st.stop()
 
-# ======= Check for required keys existence ===========
-for key in required_keys:
-    if key not in st.session_state:
-        st.warning(
-            "Required keys missing values in module <operating_processing.py>."
-        )
-        st.rerun()
 
-# ======== Keys recovery as constant variable =========
-relevant_columns = {
-    "Equipment": st.session_state.get("equipment"),
-    "SMU Hours": st.session_state.get("smu_hours_dialog")
-}
+def get_browser_df():
+    df = st.session_state.get("df_browser_model")
+    if df is None or (hasattr(df, "empty") and df.empty):
+        st.warning("⚠️ No file selected.")
+        st.stop()
+    return df
 
-mode = st.session_state.get("yearmonth_mode_op_hrs_dialog")
 
-if mode == "Select a column":
-    relevant_columns["YearMonth"] = st.session_state.get(
-        "year_month_column_op_hrs_dialog"
+def build_equipment_mapping(df_browser: pd.DataFrame) -> dict:
+    minesite = st.session_state.get("minesite")
+    column = "On Site Id" if minesite == "Essakane" else "Equip Label"
+
+    return (
+        df_browser
+        .dropna(subset=[column])
+        .drop_duplicates(subset=[column])
+        .set_index(column)["Equipment"]
+        .to_dict()
     )
-    year_month_mapping = None
 
-else:
-    year_month_mapping = {
-        "YearMonth": st.session_state.get("year_month_value_op_hrs_dialog")
+
+def apply_equipment_mapping(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
+    df = df.copy()
+    equipment_col = st.session_state.get("equipment")
+    df[equipment_col] = df[equipment_col].map(mapping).fillna(df[equipment_col])
+    return df
+
+
+def normalize_units(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    unit = st.session_state.get("time_unit_op_hrs_dialog")
+
+    if unit == "Min":
+        df["SMU Hours"] /= 60
+    elif unit == "Sec":
+        df["SMU Hours"] /= 3600
+    return df
+
+
+def prepare_columns():
+    mode = st.session_state.get("yearmonth_mode_op_hrs_dialog")
+    relevant = {
+        "Equipment": st.session_state.get("equipment"),
+        "SMU Hours": st.session_state.get("smu_hours_dialog")
     }
+    if mode == "Select a column":
+        relevant["YearMonth"] = st.session_state.get(
+            "year_month_column_op_hrs_dialog"
+        )
+        year_month = None
+    else:
+        year_month = {
+            "YearMonth": st.session_state.get(
+                "year_month_value_op_hrs_dialog"
+            )
+        }
+    return relevant, year_month
 
-browser_path = st.session_state.get('browser_path_model')
-if browser_path is None:
-    st.warning("⚠️ No file selected.")
-    st.stop()
 
+# =====================================================
+# INITIAL CHECKS
+# =====================================================
+check_required_keys([
+    "equipment",
+    "smu_hours_dialog",
+    "yearmonth_mode_op_hrs_dialog"
+])
+
+df_browser = get_browser_df()
 template_path = st.session_state.get("template_path_model")
 
-equip_column = {"Equipment": "Equipment"}
-site = {"Site": "Minesite"}
 
-model_mapping = BrowserMapping(
-    df_key= "Equipment",
-    df_target= "Model",
-    browser_key= "Equipment",
-    browser_value= "Model"
+
+# =====================================================
+# DATA PROCESSING
+# =====================================================
+if "df_model" in st.session_state:
+
+    if "df_process" not in st.session_state:
+
+        relevant_columns, year_month_mapping = prepare_columns()
+        base_df = st.session_state.get("df_model").copy()
+
+        # ---- mapping ----
+        if "equip_mapping" not in st.session_state:
+            st.session_state.equip_mapping =\
+                build_equipment_mapping(df_browser)
+        base_df =\
+            apply_equipment_mapping(base_df, st.session_state.equip_mapping)
+
+        processed_df = fetch_data(
+            dataset_type=DatasetType.OPERATING,
+            dataset=base_df,
+            template_path=template_path,
+            df_browser=df_browser,
+            selected_columns=relevant_columns,
+            equip_column={"Equipment": "Equipment"},
+            site={"Site": "Minesite"},
+            year_month=year_month_mapping,
+            mapping=BrowserMapping(
+                df_key="Equipment",
+                df_target="Model",
+                browser_key="Equipment",
+                browser_value="Model"
+            ),
+            numeric_columns="SMU Hours"
+        )
+
+        # ---- units ----
+        processed_df = normalize_units(processed_df)
+        st.session_state.df_process = processed_df
+    
+    # ---- formatting ----
+    st.session_state.df_process =\
+        format_yearmonth_column(st.session_state.df_process)
+    st.dataframe(st.session_state.df_process)
+
+# =====================================================
+# ERROR HANDLING
+# =====================================================
+df_process, errors_df = errors_handling(
+    st.session_state.df_process,
+    {"subset": ["Equipment", "YearMonth"]},
+    {"subset": ["Equipment", "SMU Hours"]},
+    {"column": "SMU Hours", "low": 0.1, "high": 730}
 )
 
-# ============= Errors constants ====================
-duplicated_col = {
-    "subset": ["Equipment", "YearMonth"]
-}
-nan_columns = {"subset": ["Equipment", "SMU Hours"]}
-outliers_col = {'column': "SMU Hours", "low": 0.1, "high": 730}
+st.session_state.df_valid = df_process
 
- 
-# ===================================================
-# FUNCTION EXECUTION
-# ===================================================
-if "df_model" in st.session_state:
-    if "df_process" not in st.session_state:
-        base_df = st.session_state.get("df_model")
-        
-        processed_df = fetch_data(
-            dataset_type= DatasetType.OPERATING,
-            dataset= base_df,
-            template_path= template_path,
-            browser_path= browser_path,
-            selected_columns= relevant_columns,
-            equip_column= equip_column,
-            site= site,
-            year_month= year_month_mapping,
-            mapping= model_mapping,
-            numeric_columns= "SMU Hours"
-        )
-        st.session_state.df_process = processed_df
+# ---- init state ----
+st.session_state.setdefault("error_step", 0)
+st.session_state.setdefault("current_error_index", 0)
 
-        if st.session_state.get("minesite") == "Essakane":
+st.session_state.setdefault(
+    "error_keys", [e for e in ERROR_ORDER if e in errors_df])
+st.session_state.setdefault("df_download", False)
 
-            if "equip_mapping" not in st.session_state:
-                st.session_state.equip_mapping = (
-                    st.session_state.df_browser_model
-                    .dropna(subset=["Equipment"])
-                    .drop_duplicates(subset=["Equipment"])
-                    .set_index("Equipment")["Equip Label"]
-                    .to_dict()
-                )
 
-                st.session_state.df_process["Equipment"] = (
-                    st.session_state.df_process["Equipment"]
-                    .map(st.session_state.equip_mapping)
-                    .fillna(st.session_state.df_process["Equipment"])
-                )
-        
-        unit_key = "time_unit_op_hrs_dialog"
-        unit = st.session_state.get(unit_key)
+# =====================================================
+# UI FUNCTIONS
+# =====================================================
+def show_summary():
 
-        if unit == 'Min':
-            st.session_state.df_process["SMU Hours"] =\
-                st.session_state.df_process["SMU Hours"] / 60
-        
-        elif unit == 'Sec':
-            st.session_state.df_process["SMU Hours"] =\
-                st.session_state.df_process["SMU Hours"] / 3600
-            
-    st.session_state.df_process = format_yearmonth_column(
-        st.session_state.df_process)
+    st.warning("⚠️ Summary of dataset errors")
+    summary = pd.DataFrame({
+        "Error type": st.session_state.error_keys,
+        "Rows count": [len(errors_df[k]) for k in st.session_state.error_keys]
+    })
+    st.dataframe(summary)
+
+    if summary["Rows count"].sum() == 0:
+        st.success("✅ No error.")
+        if st.button("Close"):
+            st.session_state.df_download = True
+            st.session_state.error_step = 0
+            st.rerun()
+    else:
+        if st.button("Next"):
+            for i, k in enumerate(st.session_state.error_keys):
+                if not errors_df[k].empty:
+                    st.session_state.current_error_index = i
+                    st.session_state.error_step = k
+                    st.rerun()
+
+def show_error_detail():
+
+    key = st.session_state.error_step
+    st.warning(f"⚠️ Handling {key.replace('_', ' ')}")
+
+    grid_df = errors_df[key]
+    gb = GridOptionsBuilder.from_dataframe(grid_df)
+    gb.configure_default_column(editable=True, filter=True, sortable=True)
+    gb.configure_selection("multiple", use_checkbox=True)
+
+    grid =\
+        AgGrid(grid_df, gridOptions=gb.build(), update_on="SELECTION_CHANGED")
     
-    st.dataframe(st.session_state.df_process)
-    
-    df_process, errors_df =  errors_handling(
-        st.session_state.df_process,
-        duplicated_col,
-        nan_columns,
-        outliers_col
-    )
-       
-    # =========== Initialize state to navigate ======
-    if "error_step" not in st.session_state:
-        st.session_state.error_step = 0
- 
-    if "error_keys" not in st.session_state:
+    selected_rows = grid.get("selected_rows", [])
+    selected =\
+        pd.DataFrame(selected_rows).loc[:, ~pd.DataFrame(
+            selected_rows
+        ).columns.str.startswith("_")] if selected_rows else pd.DataFrame()
 
-        order = ['missing_values', 'outliers', 'duplicates']
-        st.session_state.error_keys = [e for e in order if e in list(errors_df.keys())]
+    next_index = st.session_state.current_error_index + 1
+    while next_index < len(st.session_state.error_keys) and errors_df[st.session_state.error_keys[next_index]].empty:
+        next_index += 1
 
-    if "current_error_index" not in st.session_state:
-        st.session_state.current_error_index = 0
-    
-    # =========== Errors dialog entry ===============
-    def show_errors_dialog(): 
-            
-        st.warning("⚠️ Summary of errors rows in the dataset. Pay attention to handle.")
-        summary = pd.DataFrame({
-            "Error type": st.session_state.error_keys,
-            "Rows count": [len(errors_df[k]) for k in st.session_state.error_keys]
-        })
-        st.dataframe(summary)
+    if next_index < len(st.session_state.error_keys):
+        if st.button("Next"):
+            st.session_state.df_valid = pd.concat(
+                [st.session_state.df_valid, selected],
+                ignore_index=True
+            ) if not selected.empty else st.session_state.df_valid
+            st.session_state.current_error_index = next_index
+            st.session_state.error_step = st.session_state.error_keys[next_index]
+            st.rerun()
+    else:
+        if st.button("Confirm"):
+            st.session_state.df_valid = pd.concat(
+                [st.session_state.df_valid, selected],
+                ignore_index=True
+            ) if not selected.empty else st.session_state.df_valid
+            st.session_state.df_process = st.session_state.df_valid
+            st.session_state.df_download = True
+            st.session_state.error_step = 0
+            st.rerun()
 
-        if summary['Rows count'].sum() == 0:
-            st.success("✅ Your dataset haven't got errors rows.")
-            if st.button("Close"):
-                st.session_state.error_step = 0
-                st.session_state.df_download = True
-                st.rerun()
 
-        else:
-            st.error("🚨 There are few rows that hold errors.")
+# =====================================================
+# UI FLOW
+# =====================================================
+col_main, col_side = st.columns([9,1])
+with col_side:
+    if st.button("Errors"):
+        st.session_state.error_step = "summary"
 
-            if st.button("Next"):
-                # --- Move to the first errors type no empty ---
-                for i, k in enumerate(st.session_state.error_keys):
-                    if not errors_df[k].empty:
-                        st.session_state.current_error_index = i
-                        st.session_state.error_step = k
-                        st.rerun()
+if st.session_state.error_step == "summary":
+    show_summary()
+elif st.session_state.error_step in st.session_state.error_keys:
+    show_error_detail()
 
-    # ====== Dialog managing each error available ======
-    def show_errors(): 
 
-        # ----- Errors handling step by step -----
-        key = st.session_state.error_step
-        st.warning(f"⚠️ Rows with {key.replace('_', ' ')} found in the dataset.")
+# =====================================================
+# DOWNLOAD
+# =====================================================
+if st.session_state.df_download:
+    file_name = st.text_input(
+        "File Name",
+        placeholder="Enter file name",
+        width= 250
+    ).strip().replace(" ", "_")
 
-        # ---------------- AGGRID --------------------
-        gb = GridOptionsBuilder.from_dataframe(errors_df[key])
-        gb.configure_default_column(
-            editable=True,
-            filter=True,
-            sortable=True
-        )
-        gb.configure_selection("multiple", use_checkbox= True)
-
-        grid_options = gb.build()
-
-        grid_response = AgGrid(
-            errors_df[key],
-            gridOptions= grid_options,
-            update_mode= GridUpdateMode.SELECTION_CHANGED,
-            fit_columns_on_grid_load= True,
-            theme= "streamlit"
+    if file_name:
+        st.download_button(
+            label="⬇️ Download",
+            data=convert_csv(st.session_state.df_process),
+            file_name=f"{file_name}.csv",
+            mime="text/csv"
         )
 
-        selected_rows = grid_response.get("selected_rows", [])
-        edited_df_errors = pd.DataFrame(selected_rows) 
-        
-        # ----- Buton Next or Confirm if the last --------------
-        next_index = st.session_state.current_error_index + 1
-        
-        while next_index < len(st.session_state.error_keys) and errors_df[
-            st.session_state.error_keys[next_index]].empty:
-
-            next_index += 1
-
-        if next_index < len(st.session_state.error_keys):
-            if st.button("Next"):
-                st.session_state.df_process = pd.concat(
-                        [df_process, edited_df_errors], ignore_index= True)
-                                
-                st.session_state.current_error_index = next_index
-                st.session_state.error_step = st.session_state.error_keys[next_index]
-                st.rerun()
-
-        else:
-            if st.button("Confirm"):
-                st.session_state.df_process = pd.concat(
-                        [df_process, edited_df_errors], ignore_index= True)
-                    
-                st.session_state.df_download = True
-                st.session_state.error_step = 0
-                st.rerun()
-
-    col11, col12 = st.columns([9, 1])        
-    with col12:
-        # ------ Prime button to accede dialog widget ---------
-        if st.button("Errors"):
-            st.session_state.error_step = "summary"
-        
-    if st.session_state.error_step == "summary":
-        st.markdown(("Deep view on rows that held errors..."))
-        show_errors_dialog()
-    
-    if st.session_state.error_step in st.session_state.error_keys:
-        st.markdown("Handling errors")
-        show_errors()
-
-# ===========================================
-# DOWNLOAD FILE SESSION
-# ===========================================
-    with col11:
-
-        if 'df_download' not in st.session_state:
-                st.session_state.df_download = False
-
-    if st.session_state.df_download == True:   
-
-        file_name = st.text_input(
-            "File Name", width= 200,
-            placeholder= 'Enter file name')
- 
-        # --------- Create file --------------
-        csv = st.session_state.df_process.to_csv(index=False, sep=";").encode("utf-8-sig")
-
-        # Downloading button
-        if file_name != "":
-            st.download_button(
-                label="⬇️ Download",
-                data=csv,
-                file_name=f"{file_name}.csv",
-                mime="text/csv"
-            )
-            
-            
-# ===============================
-# Go back to welcome page
-# ===============================      
+# =====================================================
+# NAVIGATION
+# =====================================================
 if st.button("⬅️ Back"):
-    keys_to_clear = [
+    for key in [
         "df_process",
         "error_step",
         "error_keys",
         "current_error_index",
         "df_download"
-    ]
-
-    for key in keys_to_clear:
-        if key in st.session_state:
-            del st.session_state[key]
-
+    ]:
+        st.session_state.pop(key, None)
+        
     init_state()
-    st.switch_page("model.py") 
+    st.switch_page("model.py")
