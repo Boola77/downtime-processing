@@ -45,7 +45,7 @@ def get_browser_df():
 
 def build_equipment_mapping(df_browser: pd.DataFrame) -> dict:
     minesite = st.session_state.get("minesite")
-    column = "On Site Id" if minesite == "Essakane" else "Equip Label"
+    column = "On Site Id" if minesite in ["Essakane", 'Goulamina/CORICA'] else "Equip Label"
     return (
         df_browser
         .dropna(subset=[column])
