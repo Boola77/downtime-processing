@@ -16,6 +16,35 @@ st.set_page_config(layout="wide")
 st.title("📊 Data Processing Platform")
 
 
+def clean_for_streamlit(df):
+    df = df.copy()
+
+    for col in df.columns:
+        series = df[col]
+
+        # ignore already clean columns
+        if pd.api.types.is_datetime64_any_dtype(series):
+            continue
+
+        # 1. numeric check
+        numeric = pd.to_numeric(series, errors="coerce")
+        if numeric.notna().mean() > 0.85:
+            df[col] = numeric
+            continue
+
+        # 2. datetime ONLY if strong signal
+        if series.astype(str).str.contains(r"\d{2,4}[-/]\d{1,2}[-/]\d{1,2}", na=False).mean() > 0.7:
+            parsed = pd.to_datetime(series, errors="coerce", format="mixed")
+            if parsed.notna().mean() > 0.85:
+                df[col] = parsed
+                continue
+
+        # 3. fallback SAFE
+        df[col] = series.astype("string")
+
+    return df
+
+
 # ==========================================================
 # CACHE (PERF ONLY)
 # ==========================================================
@@ -89,7 +118,8 @@ if uploaded_file and uploaded_file.name != st.session_state.file_name:
 
     if file_name.endswith(".csv"):
         df_model = read_csv_file(uploaded_file)
-        st.session_state.df_model = df_model  # ⚡ no copy
+        df_model = clean_for_streamlit(df_model)
+        st.session_state.df_model = df_model
 
         st.session_state.success_message_model = "CSV file successfully loaded ✅"
 
@@ -127,7 +157,6 @@ if st.session_state.sheets is not None:
     )
 
     if selected_sheet:
-        # ⚡ évite relecture inutile
         if "last_sheet" not in st.session_state or st.session_state.last_sheet != selected_sheet:
             st.session_state.last_sheet = selected_sheet
 
@@ -135,7 +164,9 @@ if st.session_state.sheets is not None:
                 st.session_state.excel_file,
                 sheet_name=selected_sheet
             )
-            st.session_state.df_model = df_model  # ⚡ no copy
+
+            df_model = clean_for_streamlit(df_model)
+            st.session_state.df_model = df_model
 
 
 # ==========================================================
@@ -205,6 +236,7 @@ if st.session_state.df_model is not None:
         )
 
         edited_df_model = pd.DataFrame(grid_response["data"])
+        edited_df_model = clean_for_streamlit(edited_df_model)
 
         st.session_state.df_model = edited_df_model
 
@@ -218,8 +250,8 @@ if st.session_state.df_model is not None:
 
         if equipment_model:
 
-            st.session_state.df_browser_model['Equip Label'] = st.session_state.df_browser_model['Equip Label'].astype(str)
-            edited_df_model[equipment_model] = edited_df_model[equipment_model].astype(str)
+            st.session_state.df_browser_model = clean_for_streamlit(st.session_state.df_browser_model)
+            edited_df_model = clean_for_streamlit(edited_df_model)
 
             # ⚡ recalcul seulement si colonne change
             if "last_equipment" not in st.session_state or st.session_state.last_equipment != equipment_model:
