@@ -21,7 +21,12 @@ st.title("📊 Data Processing Platform")
 # ==========================================================
 @st.cache_data
 def load_browser(path):
-    return pd.read_csv(path, sep=None, engine='python')
+    for enc in ["utf-8", "cp1252", "latin1"]:
+        try:
+            return pd.read_csv(path, sep=None, engine="python", encoding=enc)
+        except UnicodeDecodeError:
+            continue
+    raise ValueError("Impossible de lire le CSV (encoding inconnu)")
 
 
 # ==========================================================
