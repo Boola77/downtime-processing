@@ -51,7 +51,7 @@ site_list = [
     'Agbaou/Mota', 'Bonikro/Mota', 'Essakane', 'Fekola',
     'Goulamina/CORICA', 'Kouroussa', 'Sangaredi/CBG',
     'Seguela', 'Siguiri', 'Simandou/Mota',
-    'SNIM-Guelb', 'Tongon'
+    'SNIM-Guelb', 'Tongon', 'SNTP'
 ]
 
 
