@@ -5,8 +5,9 @@ import os
 from st_aggrid import AgGrid, GridOptionsBuilder
 
 from frontend.read_files import read_csv_file, read_excel_file
-from frontend.dialogues import show_modal_downtime, show_modal_operating
+from frontend.dialogues import show_modal_downtime, show_modal_operating, file_loading_modal
 from frontend.clean_state import init_state
+
 
 
 # ==========================================================
@@ -15,6 +16,100 @@ from frontend.clean_state import init_state
 st.set_page_config(layout="wide")
 st.title("📊 Data Processing Platform")
 
+
+def clear_processing_states():
+    """
+    Reset complet avant le chargement d'un nouveau fichier.
+    Supprime tous les états liés à l'ancien traitement.
+    """
+
+    keys_to_clear = [
+
+        # ==========================
+        # DATA PRINCIPALE
+        # ==========================
+        "df_model",
+        "df_process",
+        "df_valid",
+        "df_browser_model",
+        "df_missed",
+
+        # ==========================
+        # FICHIER
+        # ==========================
+        "file_name",
+        "excel_file",
+        "sheets",
+        "selected_sheet",
+        "last_sheet",
+        "success_message_model",
+
+        # ==========================
+        # CONFIG
+        # ==========================
+        "minesite_model",
+        "equipment_model",
+        "minesite",
+        "equipment",
+        "choice",
+
+        # ==========================
+        # PATH
+        # ==========================
+        "browser_path_model",
+        "template_path_model",
+        "trainer_path_model",
+
+        # ==========================
+        # MAPPING
+        # ==========================
+        "equip_mapping",
+        "last_equipment",
+
+        # ==========================
+        # OPERATING
+        # ==========================
+        "smu_hours_dialog",
+        "time_unit_op_hrs_dialog",
+        "yearmonth_mode_op_hrs_dialog",
+        "year_month_column_op_hrs_dialog",
+        "year_month_value_op_hrs_dialog",
+
+        # ==========================
+        # DOWNTIME
+        # ==========================
+        "labour_type_dialog",
+        "work_type_dialog",
+        "comments_dialog",
+        "start_hours_dialog",
+        "end_hours_dialog",
+        "downtime_hours_dialog",
+
+        "time_unit_dt_hrs_dialog",
+        "yearmonth_mode_dt_hrs_dialog",
+        "year_month_column_dt_hrs_dialog",
+        "year_month_value_dt_hrs_dialog",
+
+        # ==========================
+        # ERRORS
+        # ==========================
+        "errors_df",
+        "error_keys",
+        "error_step",
+        "current_error_index",
+        "recompute_errors",
+
+        # ==========================
+        # DOWNLOAD
+        # ==========================
+        "df_download",
+        "df_edited",
+
+    ]
+
+    for key in keys_to_clear:
+        st.session_state.pop(key, None)
+        
 
 def clean_for_streamlit(df):
     df = df.copy()
@@ -89,6 +184,14 @@ site_list = [
 ]
 
 
+# KPI's Visualization
+col_back, col_dpp = st.columns([9, 1])
+with col_dpp:
+    if st.button("DPP ➡️"):
+        st.session_state["df_down"] = None
+        st.session_state["df_op"] = None
+        file_loading_modal()
+
 # ==========================================================
 # FILE UPLOAD SECTION
 # ==========================================================
@@ -102,34 +205,35 @@ init_state_()
 
 
 # ================== RUN UPLOADING ==================
-if uploaded_file and uploaded_file.name != st.session_state.file_name:
+if uploaded_file and uploaded_file.name != st.session_state.get("file_name"):
 
-    for key in [
-        "df_model", "success_message_model", "file_name", "excel_file",
-        "sheets", "selected_sheet", "minesite_model", "equipment_model",
-        "df_missed", "df_browser_model"
-    ]:
-        st.session_state[key] = None
+    # nouveau fichier = nettoyage complet
+    clear_processing_states()
 
-    st.session_state.choice = "Operating"
-    init_state()
+    init_state_()
 
     file_name = uploaded_file.name.lower()
 
     if file_name.endswith(".csv"):
+
         df_model = read_csv_file(uploaded_file)
         df_model = clean_for_streamlit(df_model)
-        st.session_state.df_model = df_model
 
-        st.session_state.success_message_model = "CSV file successfully loaded ✅"
+        st.session_state.df_model = df_model
+        st.session_state.success_message_model = (
+            "CSV file successfully loaded ✅"
+        )
 
     else:
         try:
             excel_file, sheets = read_excel_file(uploaded_file)
+
             st.session_state.excel_file = excel_file
             st.session_state.sheets = sheets
 
-            st.session_state.success_message_model = "Excel file successfully loaded ✅"
+            st.session_state.success_message_model = (
+                "Excel file successfully loaded ✅"
+            )
 
         except Exception as e:
             st.error(f"Wrong file extension: {e}")

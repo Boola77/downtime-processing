@@ -1,21 +1,10 @@
 # coding:utf-8
-
 import pandas as pd
-from typing import TypedDict
-
-# ----------------- TypedDicts for error checks -----------------
-class DuplicateCheck(TypedDict):
-    subset: str | list[str]
-
-class OutlierCheck(TypedDict):
-    column: str
-    low: float
-    high: float
-
-class NaNCheck(TypedDict):
-    subset: str | list[str]
 
 
+# =======================================================
+# détecte des doublons "métier" avec NaN comme joker
+# =======================================================
 def detect_duplicates(
         df: pd.DataFrame,
         columns: str | list[str],
@@ -54,6 +43,9 @@ def detect_duplicates(
     return df.loc[dup_idx]
 
 
+# =======================================================
+# détecte les valeurs manquantes
+# =======================================================
 def detect_nans(
         df: pd.DataFrame,
         columns: str | list[str]
@@ -70,6 +62,9 @@ def detect_nans(
     return df[mask]
 
 
+# =======================================================
+# vérifie la cohérence durée = End - Start
+# =======================================================
 def downtime_hrs_mismatch(
         df: pd.DataFrame,
         tolerance_minutes: int = 10
@@ -93,6 +88,9 @@ def downtime_hrs_mismatch(
     return df[diff_minutes > tolerance_minutes]
 
 
+# =======================================================
+# 
+# =======================================================
 def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
     """
     Split rows where Start Hours and End Hours span across two months
@@ -136,6 +134,9 @@ def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
     return df_final
 
 
+# =======================================================
+# 
+# =======================================================
 def get_invalid_start_month_rows(df: pd.DataFrame) -> pd.DataFrame:
     """
     Return rows where month 'Start Hours'is different
@@ -164,6 +165,9 @@ def get_invalid_start_month_rows(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+# =======================================================
+# détecte des valeurs hors bornes
+# =======================================================
 def detect_outliers(
         df: pd.DataFrame,
         column: str,
@@ -178,6 +182,113 @@ def detect_outliers(
     return df[mask]
 
 
+# =======================================================
+# 
+# =======================================================
+def correct_imbricated_period(
+    df: pd.DataFrame,
+    subset_cols: list[str],
+    start_col: str = "Start Hours",
+    end_col: str = "End Hours"
+) -> pd.DataFrame:
+    """
+    Corrige les périodes imbriquées.
+
+    Règle :
+        - une intervention qui démarre plus tard est prioritaire.
+        - les anciennes sont raccourcies ou découpées.
+
+    Retourne un DataFrame sans chevauchement.
+    """
+
+    df = df.copy()
+    df["_modified"] = False
+
+    df[start_col] = pd.to_datetime(df[start_col])
+    df[end_col] = pd.to_datetime(df[end_col])
+
+    corrected = []
+
+    for _, group in df.groupby(subset_cols):
+
+        group = group.sort_values(start_col)
+
+        result = []
+
+        for _, current in group.iterrows():
+
+            current_start = current[start_col]
+            current_end = current[end_col]
+
+            new_result = []
+
+            overlap_found = False
+
+            for _, old in pd.DataFrame(result).iterrows() if len(result) else []:
+
+                old_start = old[start_col]
+                old_end = old[end_col]
+
+                # Aucun chevauchement
+                if old_end <= current_start or old_start >= current_end:
+                    new_result.append(old)
+                    continue
+
+                overlap_found = True
+
+                # Ancienne période avant la nouvelle
+                if old_start < current_start:
+                    left = old.copy()
+                    left[end_col] = current_start
+                    left["_modified"] = True
+
+                    if left[start_col] < left[end_col]:
+                        new_result.append(left)
+
+                # Ancienne période après la nouvelle
+                if old_end > current_end:
+                    right = old.copy()
+                    right[start_col] = current_end
+                    right["_modified"] = True
+
+                    if right[start_col] < right[end_col]:
+                        new_result.append(right)            
+                
+            current = current.copy()
+            current["_modified"] = overlap_found
+
+            new_result.append(current)
+
+            result = sorted(
+                new_result,
+                key=lambda x: x[start_col]
+            )
+
+        corrected.extend(result)
+
+    corrected = pd.DataFrame(corrected)
+
+    corrected = corrected.sort_values(
+        subset_cols + [start_col]
+    ).reset_index(drop=True)
+
+    # Recalcul de la durée en heures
+    mask = corrected["_modified"]
+
+    corrected.loc[mask, "DowntimeHours"] = (
+        (
+            corrected.loc[mask, end_col]
+            - corrected.loc[mask, start_col]
+        ).dt.total_seconds() / 3600
+    )
+    corrected = corrected.drop(columns="_modified")
+
+    return corrected
+
+
+# =======================================================
+# 
+# =======================================================
 def detect_imbricated_period(
         df: pd.DataFrame,
         subset_cols: list[str],
@@ -196,7 +307,7 @@ def detect_imbricated_period(
         Returns:
             df_clean, df_anomalies
     """
-
+ 
     df = df.copy()
 
     # Sécuriser les types datetime
@@ -233,25 +344,3 @@ def detect_imbricated_period(
     df_clean = df.drop(index=rows_flagged).reset_index(drop=True)
 
     return df_clean, df_anomalies
-
-
-def detect_negative_values(
-        df: pd.DataFrame,
-        column: str
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Return two DataFrames:
-        1. rows without negative values in the column
-        2. rows with negative values in the column
-    """
-
-    df = df.copy()
-
-    if column not in df.columns:
-        raise ValueError(f"Column '{column}' not found in DataFrame")
-    
-    mask = df[column] < 0
-
-    df_positive = df.loc[~mask].reset_index(drop=True)
-    df_negative = df.loc[mask].reset_index(drop=True)
-
-    return df_positive, df_negative

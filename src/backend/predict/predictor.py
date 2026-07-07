@@ -91,6 +91,8 @@ def fill_description_cat(df):
 
     mask = df['Description CAT'].isna()
 
+    df["Description CAT"] = df["Description CAT"].astype("string")
+
     if mask.any():
         df.loc[mask, 'Description CAT'] = predict_batch(df.loc[mask])
 

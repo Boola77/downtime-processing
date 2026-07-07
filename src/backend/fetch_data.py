@@ -3,6 +3,7 @@
 from enum import Enum
 from typing import Mapping
 from backend.packages.filtering import *
+from backend.packages.errors import *
 
 
 class DatasetType(str, Enum):
@@ -61,5 +62,11 @@ def fetch_data(
         df = assign_year_month(df, year_month)
         
     df = assign_model(df, df_browser, mapping)
+    
+    if downtime:
+        df = correct_imbricated_period(
+            convert_to_datetime(df, ["Start Hours", "End Hours"]),
+            subset_cols= ['Equip No']
+        )
 
     return df

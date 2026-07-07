@@ -1,14 +1,15 @@
 # coding:utf-8
 import streamlit as st
 import pandas as pd
-from st_aggrid import AgGrid, GridOptionsBuilder
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 from backend.fetch_data import fetch_data, DatasetType
 from backend.packages.filtering import format_yearmonth_column, BrowserMapping
 from backend.errors_handling import errors_handling
 from backend.predict.predictor import fill_description_cat
 from frontend.clean_state import init_state
-
+from backend.packages.kips import check_kpis_value
+ 
 # =====================================================
 # CONFIG
 # =====================================================
@@ -16,7 +17,7 @@ st.set_page_config(page_title="Downtime Hours")
 st.title("Downtime Data Processing")
 
 ERROR_ORDER = [
-    'missing_values', 'start_hours_mismatch', 'Negative_Hours',
+    'missing_values', 'start_hours_mismatch',
     'Downtime_imbricated_period', 'downtime_mismatch', 'duplicates'
 ]
 
@@ -309,13 +310,14 @@ def show_error_detail():
     grid = AgGrid(
         grid_df,
         gridOptions=gb.build(),
-        update_on="SELECTION_CHANGED",
+        update_mode=GridUpdateMode.MODEL_CHANGED
+        | GridUpdateMode.SELECTION_CHANGED,
         fit_columns_on_grid_load=True,
         theme="streamlit",
         key=f"errors_grid_{key}"
     )
 
-    selected_rows = grid.get("selected_rows", [])
+    selected_rows = grid.selected_rows
     selected = pd.DataFrame(selected_rows) if selected_rows else pd.DataFrame()
     
     if not selected.empty:
@@ -386,6 +388,8 @@ if st.session_state.df_edited:
     )
     file_name = file_name.strip().replace(" ", "_")
     if file_name:
+        st.session_state["df_down"] = st.session_state.df_process
+        st.session_state["df_down_name"] = file_name
         st.download_button(
             label="⬇️ Download",
             data=convert_csv(st.session_state.df_process),
@@ -393,16 +397,45 @@ if st.session_state.df_edited:
             mime="text/csv"
         )
 
+# KPI's Visualization
+col_back, col_dpp = st.columns([9, 1])
+
+has_csv = (
+    st.session_state.get("df_down") is not None
+    and st.session_state.get("df_op") is not None
+)
+ 
+problem = pd.DataFrame()
+
+if has_csv:
+    df_down = st.session_state["df_down"]
+    df_op = st.session_state["df_op"]
+
+    df_merge = check_kpis_value(
+        df_down=df_down.copy(),
+        df_op=df_op.copy()
+    )
+
+    problem = df_merge[df_merge["Used Hrs"] > df_merge["Calendar Hrs"]]
+
+enable_dpp = has_csv and not problem.empty
+
+with col_dpp:
+    if st.button("DPP ➡️", disabled=not enable_dpp):
+        st.switch_page("pages/visualization.py")
+
+
 # =====================================================
 # NAVIGATION
 # =====================================================
-if st.button("⬅️ Back"):
-    keys_to_clear = [
-        "df_process", "error_step", "error_keys",
-        "current_error_index", "df_edited"
-    ]
-    for key in keys_to_clear:
-        if key in st.session_state:
-            st.session_state.pop(key, None)
-    init_state()
-    st.switch_page("model.py")
+with col_back:
+    if st.button("⬅️ Back"):
+        keys_to_clear = [
+            "df_process", "error_step", "error_keys",
+            "current_error_index", "df_edited"
+        ]
+        for key in keys_to_clear:
+            if key in st.session_state:
+                st.session_state.pop(key, None)
+        init_state()
+        st.switch_page("model.py")

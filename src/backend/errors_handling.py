@@ -70,8 +70,7 @@ def errors_handling(
 
     # ---------- DOWNTIME ----------
     if downtime:
-        df = convert_to_datetime(df, ["Start Hours", "End Hours"])
-      
+              
         mismatch = downtime_hrs_mismatch(df)
         df = df.drop(mismatch.index)
         errors["downtime_mismatch"] = mismatch.reset_index(drop=True)
@@ -79,17 +78,17 @@ def errors_handling(
         df = reset_exceed_end_time(df)
 
         df, errors["start_hours_mismatch"] = get_invalid_start_month_rows(df)
-
-        df, errors['Negative_Hours'] = detect_negative_values(df, 'DowntimeHours')
  
         df, errors['Downtime_imbricated_period'] = detect_imbricated_period(
             df,
             subset_cols= ['Equip No','Model', 'Labour Type', 'Comments']
         )
 
-    if not downtime:
-        df, errors['Negative_Hours'] = detect_negative_values(df, 'SMU Hours')
-    
+        df = correct_imbricated_period(
+            convert_to_datetime(df, ["Start Hours", "End Hours"]),
+            subset_cols= ['Equip No']
+        )
+
     df = df.reset_index(drop= True)
 
     return df, errors

@@ -1,6 +1,8 @@
 #coding:utf-8
-
+import pandas as pd
 import streamlit as st
+
+from backend.packages.kips import check_kpis_value
 
 
 @st.dialog("📝 Required informations")
@@ -174,3 +176,89 @@ def show_modal_downtime():
         st.session_state.time_unit_dt_hrs_dialog = duration_unit
 
         st.switch_page("pages/downtime_processing.py")
+
+
+@st.dialog("✅ Load Operating & Downtime dataset")    
+def file_loading_modal():
+
+    uploaded_files = st.file_uploader(
+        "Load the Operating and Downtime CSV files",
+        type=["csv"],
+        accept_multiple_files=True,
+        width=600
+    )
+
+    if uploaded_files:
+        # Reset previous data
+        st.session_state["df_down"] = None
+        st.session_state["df_op"] = None
+        st.session_state["df_down_name"] = None
+        st.session_state["df_op_name"] = None
+
+        if len(uploaded_files) != 2:
+            st.warning("Please select exactly 2 CSV files.")
+            st.stop()
+            
+        for uploaded_file in uploaded_files:
+            df = pd.read_csv(uploaded_file, sep=";")
+
+            if "Equip No" in df.columns:
+
+                if st.session_state["df_down"] is not None:
+                    st.warning(
+                        f"'{uploaded_file.name}' is another Downtime file. "
+                        "Please load one Operating file and one Downtime file."
+                    )
+                    st.stop()
+
+                st.session_state["df_down"] = df
+                st.session_state["df_down_name"] = uploaded_file.name
+
+            elif "Equipment" in df.columns:
+
+                if st.session_state["df_op"] is not None:
+                    st.warning(
+                        f"'{uploaded_file.name}' is another Operating file. "
+                        "Please load one Operating file and one Downtime file."
+                    )
+                    st.stop()
+
+                st.session_state["df_op"] = df
+                st.session_state["df_op_name"] = uploaded_file.name
+
+            else:
+                st.warning(
+                    f"'{uploaded_file.name}' is not a valid Operating or Downtime file."
+                )
+                st.stop()
+
+        st.success("✅ Operating and Downtime files successfully loaded.")
+
+        st.write(f"**Operating:** {st.session_state['df_op_name']}")
+        st.write(f"**Downtime:** {st.session_state['df_down_name']}")
+
+    # ===============================
+    # NEXT
+    # ===============================
+    if st.button("NEXT", type="primary"):
+
+        if (
+            st.session_state.get("df_down") is None
+            or st.session_state.get("df_op") is None
+        ):
+            st.warning("Please load one Operating file and one Downtime file.")
+            st.stop()
+
+        df_merge = check_kpis_value(
+            df_down=st.session_state.df_down,
+            df_op=st.session_state.df_op,
+        )
+
+        problem = df_merge[
+            df_merge["Used Hrs"] > df_merge["Calendar Hrs"]
+        ]
+
+        if problem.empty:
+            st.switch_page("pages/clean_view.py")
+        else:
+            st.switch_page("pages/visualization.py")

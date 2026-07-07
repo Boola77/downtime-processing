@@ -7,6 +7,7 @@ from backend.fetch_data import fetch_data, DatasetType
 from backend.packages.filtering import format_yearmonth_column, BrowserMapping
 from backend.errors_handling import errors_handling
 from frontend.clean_state import init_state
+from backend.packages.kips import check_kpis_value
 
 
 
@@ -16,7 +17,7 @@ from frontend.clean_state import init_state
 st.set_page_config(page_title="Operating Hours")
 st.title("Operating Data Processing")
 
-ERROR_ORDER = ['missing_values', 'outliers', 'duplicates', 'Negative_Hours']
+ERROR_ORDER = ['missing_values', 'outliers', 'duplicates']
 
 
 # =====================================================
@@ -240,7 +241,7 @@ def show_error_detail():
             st.session_state.df_download = True
             st.session_state.error_step = 0
             st.rerun()
-
+ 
 
 # =====================================================
 # UI FLOW
@@ -255,7 +256,6 @@ if st.session_state.error_step == "summary":
 elif st.session_state.error_step in st.session_state.error_keys:
     show_error_detail()
 
-
 # =====================================================
 # DOWNLOAD
 # =====================================================
@@ -267,6 +267,8 @@ if st.session_state.df_download:
     ).strip().replace(" ", "_")
 
     if file_name:
+        st.session_state["df_op"] = st.session_state.df_process
+        st.session_state["df_op_name"] = file_name
         st.download_button(
             label="⬇️ Download",
             data=convert_csv(st.session_state.df_process),
@@ -274,18 +276,47 @@ if st.session_state.df_download:
             mime="text/csv"
         )
 
+# KPI's Visualization
+col_back, col_dpp = st.columns([9, 1])
+
+has_csv = (
+    st.session_state.get("df_down") is not None
+    and st.session_state.get("df_op") is not None
+)
+
+problem = pd.DataFrame()
+
+if has_csv:
+    df_down = st.session_state["df_down"]
+    df_op = st.session_state["df_op"]
+
+    df_merge = check_kpis_value(
+        df_down=df_down.copy(),
+        df_op=df_op.copy()
+    )
+
+    problem = df_merge[df_merge["Used Hrs"] > df_merge["Calendar Hrs"]]
+
+enable_dpp = has_csv and not problem.empty
+
+with col_dpp:
+    if st.button("DPP ➡️", disabled=not enable_dpp):
+        st.switch_page("pages/visualization.py")
+
+
 # =====================================================
 # NAVIGATION
 # =====================================================
-if st.button("⬅️ Back"):
-    for key in [
-        "df_process",
-        "error_step",
-        "error_keys",
-        "current_error_index",
-        "df_download"
-    ]:
-        st.session_state.pop(key, None)
-        
-    init_state()
-    st.switch_page("model.py")
+with col_back:
+    if st.button("⬅️ Back"):
+        for key in [
+            "df_process",
+            "error_step",
+            "error_keys",
+            "current_error_index",
+            "df_download"
+        ]:
+            st.session_state.pop(key, None)
+            
+        init_state()
+        st.switch_page("model.py")
