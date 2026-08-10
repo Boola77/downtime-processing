@@ -362,21 +362,21 @@ if st.session_state.df_model is not None:
 
                 st.session_state.last_equipment = equipment_model
 
-                if minesite_model in ['Essakane', 'Goulamina/CORICA']:
-                    df_missed = st.session_state.df_browser_model[
-                        ~st.session_state.df_browser_model['On Site Id'].isin(
-                            edited_df_model[equipment_model].unique())
-                    ][['Equipment', 'On Site Id', "SerialNumber", 'Model', "Parent Product Family", "Status"]].reset_index(drop=True)
+                # if minesite_model in ['Essakane', 'Goulamina/CORICA']:
+                df_missed = st.session_state.df_browser_model[
+                    ~st.session_state.df_browser_model['On Site Id'].isin(
+                        edited_df_model[equipment_model].unique())
+                ][['Equipment', 'On Site Id', "SerialNumber", 'Model', "Parent Product Family", "Status"]].reset_index(drop=True)
 
-                    df_missed.rename(columns={'On Site Id': equipment_model}, inplace=True)
+                df_missed.rename(columns={'On Site Id': equipment_model}, inplace=True)
 
-                else:
-                    df_missed = st.session_state.df_browser_model[
-                        ~st.session_state.df_browser_model['On Site Id'].isin(
-                            edited_df_model[equipment_model].unique())
-                    ][['Equipment', 'On Site Id', "SerialNumber", 'Model', "Parent Product Family", "Status"]].reset_index(drop=True)
+                # else:
+                #     df_missed = st.session_state.df_browser_model[
+                #         ~st.session_state.df_browser_model['On Site Id'].isin(
+                #             edited_df_model[equipment_model].unique())
+                #     ][['Equipment', 'On Site Id', "SerialNumber", 'Model', "Parent Product Family", "Status"]].reset_index(drop=True)
 
-                    df_missed.rename(columns={'On Site Id': equipment_model}, inplace=True)
+                #     df_missed.rename(columns={'On Site Id': equipment_model}, inplace=True)
 
                 st.session_state.df_missed = df_missed if not df_missed.empty else None
 
