@@ -178,9 +178,9 @@ def init_state_():
 
 site_list = [
     'Agbaou/Mota', 'Bonikro/Mota', 'Essakane', 'Fekola',
-    'Goulamina/CORICA', 'Kouroussa', 'Sangaredi/CBG',
+    'Goulamina/CORICA', 'Kouroussa/Corica', 'Sangaredi/CBG',
     'Seguela', 'Siguiri', 'Simandou/Mota',
-    'SNIM-Guelb', 'Tongon', 'SNTP'
+    'SNIM-Guelb', 'Tongon', 'SNTP', 'Kone/Montage'
 ]
 
 
