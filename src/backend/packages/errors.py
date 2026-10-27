@@ -93,9 +93,10 @@ def downtime_hrs_mismatch(
 # =======================================================
 def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Split rows when Start Hours and End Hours cross
-    the end of the month indicated by YearMonth.
-    Preserve the original YearMonth values.
+    Split intervals at month boundaries, then split the
+    remaining interval at 06:30 to assign the next shift.
+
+    Preserve the original YearMonth values where applicable.
     """
 
     df = df.copy()
@@ -107,10 +108,9 @@ def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
         df["End Hours"], errors="coerce"
     )
 
-    # Keep the original YearMonth values unchanged
+    # Temporary conversion; the original YearMonth is preserved
     year_month = pd.to_datetime(
-        df["YearMonth"].astype(str),
-        errors="coerce"
+        df["YearMonth"].astype(str), errors="coerce"
     )
 
     result = []
@@ -120,39 +120,75 @@ def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
 
         start = row["Start Hours"]
         end = row["End Hours"]
-        reference_month = year_month.iloc[pos]
+        reference = year_month.iloc[pos]
 
         if (
             pd.isna(start)
             or pd.isna(end)
-            or pd.isna(reference_month)
+            or pd.isna(reference)
             or end <= start
         ):
             result.append(row)
             continue
 
-        # First day of the month following YearMonth
-        next_month = (
-            reference_month.to_period("M") + 1
+        # First split: end of the reference month
+        month_boundary = (
+            reference.to_period("M") + 1
         ).start_time
 
-        # Split at the end of the reference month
-        if start < next_month < end:
-            first_part = row.copy()
-            first_part["End Hours"] = next_month
-            first_part["DowntimeHours"] = (
-                next_month - start
+        if start < month_boundary < end:
+            first = row.copy()
+            first["End Hours"] = month_boundary
+            first["DowntimeHours"] = (
+                month_boundary - start
             ).total_seconds() / 3600
+            result.append(first)
 
-            second_part = row.copy()
-            second_part["Start Hours"] = next_month
-            second_part["DowntimeHours"] = (
-                end - next_month
-            ).total_seconds() / 3600
-
-            result.extend([first_part, second_part])
+            remaining_start = month_boundary
         else:
-            result.append(row)
+            remaining_start = start
+
+        # Split the remaining interval at 06:30 on the
+        # first day where a new shift should be assigned.
+        shift_boundary = (
+            remaining_start.normalize()
+            + pd.Timedelta(hours=6, minutes=30)
+        )
+
+        if shift_boundary <= remaining_start:
+            shift_boundary += pd.Timedelta(days=1)
+
+        if remaining_start < shift_boundary < end:
+            # Segment before 06:30 retains the original YearMonth
+            middle = row.copy()
+            middle["Start Hours"] = remaining_start
+            middle["End Hours"] = shift_boundary
+            middle["DowntimeHours"] = (
+                shift_boundary - remaining_start
+            ).total_seconds() / 3600
+            result.append(middle)
+
+            # Remaining segment receives the new shift date
+            last = row.copy()
+            last["Start Hours"] = shift_boundary
+            last["YearMonth"] = shift_boundary.strftime("%Y-%m-%d")
+            last["DowntimeHours"] = (
+                end - shift_boundary
+            ).total_seconds() / 3600
+            result.append(last)
+        else:
+            # No additional shift split needed
+            if remaining_start == start and not (
+                start < month_boundary < end
+            ):
+                result.append(row)
+            elif remaining_start < end:
+                last = row.copy()
+                last["Start Hours"] = remaining_start
+                last["DowntimeHours"] = (
+                    end - remaining_start
+                ).total_seconds() / 3600
+                result.append(last)
 
     return pd.DataFrame(result).reset_index(drop=True)
 
