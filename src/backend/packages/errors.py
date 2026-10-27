@@ -108,7 +108,7 @@ def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # Convertir YearMonth au format datetime
-    yyear_month = pd.to_datetime(
+    year_month = pd.to_datetime(
         df["YearMonth"].astype(str),
         errors="coerce"
     )
