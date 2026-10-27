@@ -91,47 +91,75 @@ def downtime_hrs_mismatch(
 # =======================================================
 # 
 # =======================================================
-def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
+def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame: 
     """
-    Split rows where Start Hours and End Hours span across two months
-    so that no DowntimeHours crosses a month boundary.
+        Split rows where Start Hours and End Hours
+        span two different months, taking into account
+        the different YearMonth values.
     """
 
     df = df.copy()
 
-    df["Start Hours"] = pd.to_datetime(df["Start Hours"], errors="coerce")
-    df["End Hours"] = pd.to_datetime(df["End Hours"], errors="coerce")
+    df["Start Hours"] = pd.to_datetime(
+        df["Start Hours"], errors="coerce"
+    )
+    df["End Hours"] = pd.to_datetime(
+        df["End Hours"], errors="coerce"
+    )
 
-    # Beginning of month based on Start Hours
-    df["month_start"] = df["Start Hours"].values.astype("datetime64[M]")
-    df["next_month"] = df["month_start"] + pd.offsets.MonthBegin(1)
+    # Convertir YearMonth au format datetime
+    yyear_month = pd.to_datetime(
+        df["YearMonth"].astype(str),
+        errors="coerce"
+    )
 
-    # Rows that spill over into the next month
-    mask = df["End Hours"] > df["next_month"]
+    rows_to_add = []
 
-    # ---- Slice 1 (Current motnh) ----
-    df_current = df.copy()
-    df_current.loc[mask, "End Hours"] = df_current.loc[mask, "next_month"]
+    # Regrouper par mois, même si YearMonth contient
+    # des dates au format AAAA-MM-JJ.
+    for month_start, indices in year_month.groupby(
+        year_month.dt.to_period("M")
+    ).groups.items():
 
-    df_current["DowntimeHours"] = (
-        df_current["End Hours"] - df_current["Start Hours"]
-    ).dt.total_seconds() / 3600
+        month_start = month_start.start_time
+        next_month = month_start + pd.offsets.MonthBegin(1)
 
-    # ---- Slice 2 (Next month) ----
-    df_next = df.loc[mask].copy()
-    df_next["Start Hours"] = df_next["next_month"]
+        group = df.loc[indices]
 
-    df_next["DowntimeHours"] = (
-        df_next["End Hours"] - df_next["Start Hours"]
-    ).dt.total_seconds() / 3600
+        # Lignes qui dépassent la fin du mois
+        mask = (
+            (group["End Hours"] > next_month)
+            & (group["Start Hours"] < next_month)
+        )
 
-    # Concat
-    df_final = pd.concat([df_current, df_next], ignore_index=True)
+        split_rows = group.loc[mask].copy()
 
-    # Cleaning
-    df_final = df_final.drop(columns=["month_start", "next_month"])
+        if split_rows.empty:
+            continue
 
-    return df_final
+        # Deuxième partie
+        split_rows["Start Hours"] = next_month
+        split_rows["DowntimeHours"] = (
+            split_rows["End Hours"] - split_rows["Start Hours"]
+        ).dt.total_seconds() / 3600
+
+        rows_to_add.append(split_rows)
+
+        # Première partie
+        df.loc[split_rows.index, "End Hours"] = next_month
+        df.loc[split_rows.index, "DowntimeHours"] = (
+            df.loc[split_rows.index, "End Hours"]
+            - df.loc[split_rows.index, "Start Hours"]
+        ).dt.total_seconds() / 3600
+
+    # Ajouter les nouvelles lignes sans modifier YearMonth
+    if rows_to_add:
+        df = pd.concat(
+            [df] + rows_to_add,
+            ignore_index=True
+        )
+
+    return df
 
 
 # =======================================================
