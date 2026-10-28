@@ -93,24 +93,27 @@ def downtime_hrs_mismatch(
 # =======================================================
 def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Split intervals at month boundaries, then split the
-    remaining interval at 06:30 to assign the next shift.
+    Split intervals at every month boundary and at 06:30
+    immediately following each month boundary.
 
-    Preserve the original YearMonth values where applicable.
+    Preserve the original YearMonth until the 06:30 boundary.
+    Recalculate DowntimeHours for every generated segment.
     """
 
     df = df.copy()
 
+    # Dates au format jour/mois/année
     df["Start Hours"] = pd.to_datetime(
-        df["Start Hours"], errors="coerce"
+        df["Start Hours"], errors="coerce", dayfirst=True
     )
     df["End Hours"] = pd.to_datetime(
-        df["End Hours"], errors="coerce"
+        df["End Hours"], errors="coerce", dayfirst=True
     )
 
-    # Temporary conversion; the original YearMonth is preserved
-    year_month = pd.to_datetime(
-        df["YearMonth"].astype(str), errors="coerce"
+    original_year_month = pd.to_datetime(
+        df["YearMonth"].astype(str),
+        errors="coerce",
+        dayfirst=True
     )
 
     result = []
@@ -120,8 +123,9 @@ def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
 
         start = row["Start Hours"]
         end = row["End Hours"]
-        reference = year_month.iloc[pos]
+        reference = original_year_month.iloc[pos]
 
+        # Conserver les lignes invalides sans modification
         if (
             pd.isna(start)
             or pd.isna(end)
@@ -131,67 +135,103 @@ def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
             result.append(row)
             continue
 
-        # First split: end of the reference month
-        month_boundary = (
-            reference.to_period("M") + 1
-        ).start_time
+        cursor = start
+        current_year_month = row["YearMonth"]
 
-        if start < month_boundary < end:
-            first = row.copy()
-            first["End Hours"] = month_boundary
-            first["DowntimeHours"] = (
-                month_boundary - start
+        def append_segment(segment_start, segment_end, year_month):
+            """Add a segment and recalculate its duration."""
+            if segment_end <= segment_start:
+                return
+
+            segment = row.copy()
+            segment["Start Hours"] = segment_start
+            segment["End Hours"] = segment_end
+            segment["YearMonth"] = year_month
+            segment["DowntimeHours"] = (
+                segment_end - segment_start
             ).total_seconds() / 3600
-            result.append(first)
 
-            remaining_start = month_boundary
-        else:
-            remaining_start = start
+            result.append(segment)
 
-        # Split the remaining interval at 06:30 on the
-        # first day where a new shift should be assigned.
-        shift_boundary = (
-            remaining_start.normalize()
-            + pd.Timedelta(hours=6, minutes=30)
-        )
+        while cursor < end:
 
-        if shift_boundary <= remaining_start:
-            shift_boundary += pd.Timedelta(days=1)
+            # Prochaine frontière mensuelle
+            month_boundary = (
+                cursor.to_period("M") + 1
+            ).start_time
 
-        if remaining_start < shift_boundary < end:
-            # Segment before 06:30 retains the original YearMonth
-            middle = row.copy()
-            middle["Start Hours"] = remaining_start
-            middle["End Hours"] = shift_boundary
-            middle["DowntimeHours"] = (
-                shift_boundary - remaining_start
-            ).total_seconds() / 3600
-            result.append(middle)
+            # Si l'intervalle traverse la fin du mois
+            if cursor < month_boundary < end:
 
-            # Remaining segment receives the new shift date
-            last = row.copy()
-            last["Start Hours"] = shift_boundary
-            last["YearMonth"] = shift_boundary.strftime("%Y-%m-%d")
-            last["DowntimeHours"] = (
-                end - shift_boundary
-            ).total_seconds() / 3600
-            result.append(last)
-        else:
-            # No additional shift split needed
-            if remaining_start == start and not (
-                start < month_boundary < end
-            ):
-                result.append(row)
-            elif remaining_start < end:
-                last = row.copy()
-                last["Start Hours"] = remaining_start
-                last["DowntimeHours"] = (
-                    end - remaining_start
-                ).total_seconds() / 3600
-                result.append(last)
+                # 1. Segment jusqu'à minuit
+                append_segment(
+                    cursor,
+                    month_boundary,
+                    current_year_month
+                )
+
+                # 2. Frontière de changement d'équipe à 06:30
+                shift_boundary = (
+                    month_boundary
+                    + pd.Timedelta(hours=6, minutes=30)
+                )
+
+                if end <= shift_boundary:
+                    # L'intervalle s'arrête avant ou à 06:30
+                    append_segment(
+                        month_boundary,
+                        end,
+                        current_year_month
+                    )
+                    break
+
+                # Segment entre minuit et 06:30 :
+                # conserver le YearMonth précédent
+                append_segment(
+                    month_boundary,
+                    shift_boundary,
+                    current_year_month
+                )
+
+                # 3. Après 06:30, affecter la nouvelle date
+                cursor = shift_boundary
+                current_year_month = shift_boundary.normalize()
+
+            else:
+                # Aucun autre changement de mois avant la fin.
+                # Si l'intervalle commence exactement à minuit
+                # le premier jour d'un mois, appliquer aussi 06:30.
+                is_month_start = (
+                    cursor.day == 1
+                    and cursor == cursor.normalize()
+                )
+
+                if is_month_start:
+                    shift_boundary = (
+                        cursor + pd.Timedelta(
+                            hours=6, minutes=30
+                        )
+                    )
+
+                    if cursor < shift_boundary < end:
+                        append_segment(
+                            cursor,
+                            shift_boundary,
+                            current_year_month
+                        )
+
+                        cursor = shift_boundary
+                        current_year_month = cursor.normalize()
+                        continue
+
+                append_segment(
+                    cursor,
+                    end,
+                    current_year_month
+                )
+                break
 
     return pd.DataFrame(result).reset_index(drop=True)
-
 
 # =======================================================
 # 
