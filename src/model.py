@@ -1,11 +1,13 @@
+# coding:utf-8
 import streamlit as st
 import pandas as pd
 import os
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from st_aggrid import AgGrid, GridOptionsBuilder
 
 from frontend.read_files import read_csv_file, read_excel_file
-from frontend.dialogues import show_modal_downtime, show_modal_operating
+from frontend.dialogues import show_modal_downtime, show_modal_operating, file_loading_modal
 from frontend.clean_state import init_state
+
 
 
 # ==========================================================
@@ -13,6 +15,142 @@ from frontend.clean_state import init_state
 # ==========================================================
 st.set_page_config(layout="wide")
 st.title("📊 Data Processing Platform")
+
+
+def clear_processing_states():
+    """
+    Reset complet avant le chargement d'un nouveau fichier.
+    Supprime tous les états liés à l'ancien traitement.
+    """
+
+    keys_to_clear = [
+
+        # ==========================
+        # DATA PRINCIPALE
+        # ==========================
+        "df_model",
+        "df_process",
+        "df_valid",
+        "df_browser_model",
+        "df_missed",
+
+        # ==========================
+        # FICHIER
+        # ==========================
+        "file_name",
+        "excel_file",
+        "sheets",
+        "selected_sheet",
+        "last_sheet",
+        "success_message_model",
+
+        # ==========================
+        # CONFIG
+        # ==========================
+        "minesite_model",
+        "equipment_model",
+        "minesite",
+        "equipment",
+        "choice",
+
+        # ==========================
+        # PATH
+        # ==========================
+        "browser_path_model",
+        "template_path_model",
+        "trainer_path_model",
+
+        # ==========================
+        # MAPPING
+        # ==========================
+        "equip_mapping",
+        "last_equipment",
+
+        # ==========================
+        # OPERATING
+        # ==========================
+        "smu_hours_dialog",
+        "time_unit_op_hrs_dialog",
+        "yearmonth_mode_op_hrs_dialog",
+        "year_month_column_op_hrs_dialog",
+        "year_month_value_op_hrs_dialog",
+
+        # ==========================
+        # DOWNTIME
+        # ==========================
+        "labour_type_dialog",
+        "work_type_dialog",
+        "comments_dialog",
+        "start_hours_dialog",
+        "end_hours_dialog",
+        "downtime_hours_dialog",
+
+        "time_unit_dt_hrs_dialog",
+        "yearmonth_mode_dt_hrs_dialog",
+        "year_month_column_dt_hrs_dialog",
+        "year_month_value_dt_hrs_dialog",
+
+        # ==========================
+        # ERRORS
+        # ==========================
+        "errors_df",
+        "error_keys",
+        "error_step",
+        "current_error_index",
+        "recompute_errors",
+
+        # ==========================
+        # DOWNLOAD
+        # ==========================
+        "df_download",
+        "df_edited",
+
+    ]
+
+    for key in keys_to_clear:
+        st.session_state.pop(key, None)
+        
+
+def clean_for_streamlit(df):
+    df = df.copy()
+
+    for col in df.columns:
+        series = df[col]
+
+        # ignore already clean columns
+        if pd.api.types.is_datetime64_any_dtype(series):
+            continue
+
+        # 1. numeric check
+        numeric = pd.to_numeric(series, errors="coerce")
+        if numeric.notna().mean() > 0.85:
+            df[col] = numeric
+            continue
+
+        # 2. datetime ONLY if strong signal
+        if series.astype(str).str.contains(r"\d{2,4}[-/]\d{1,2}[-/]\d{1,2}", na=False).mean() > 0.7:
+            parsed = pd.to_datetime(series, errors="coerce", format="mixed")
+            if parsed.notna().mean() > 0.85:
+                df[col] = parsed
+                continue
+
+        # 3. fallback SAFE
+        df[col] = series.astype("string")
+
+    return df
+
+
+# ==========================================================
+# CACHE (PERF ONLY)
+# ==========================================================
+@st.cache_data
+def load_browser(path):
+    for enc in ["utf-8", "cp1252", "latin1"]:
+        try:
+            return pd.read_csv(path, sep=None, engine="python", encoding=enc)
+        except UnicodeDecodeError:
+            continue
+    raise ValueError("Impossible de lire le CSV (encoding inconnu)")
 
 
 # ==========================================================
@@ -39,12 +177,20 @@ def init_state_():
 
 
 site_list = [
-    'Agbaou', 'Bonikro', 'Essakane', 'Fekola',
-    'Goulamina', 'Kouroussa', 'Sangaredi',
-    'Seguela', 'Siguiri', 'Simandou',
-    'SNIM', 'Tongon'
+    'Agbaou/Mota', 'Bonikro/Mota', 'Essakane', 'Fekola',
+    'Goulamina/CORICA', 'Kouroussa/Corica', 'Sangaredi/CBG',
+    'Seguela', 'Siguiri', 'Simandou/Mota', 'Kouroussa/KGM',
+    'SNIM-Guelb', 'Tongon', 'SNTP', 'Kone/Montage'
 ]
 
+
+# KPI's Visualization
+col_back, col_dpp = st.columns([9, 1])
+with col_dpp:
+    if st.button("DPP ➡️"):
+        st.session_state["df_down"] = None
+        st.session_state["df_op"] = None
+        file_loading_modal()
 
 # ==========================================================
 # FILE UPLOAD SECTION
@@ -52,61 +198,58 @@ site_list = [
 uploaded_file = st.file_uploader(
     "Load Excel or CSV file",
     type=["xlsx", "csv", "xls", "xlsm"],
-    width = 600
+    width=600
 )
 
-# if 'df_model' not in st.session_state:
 init_state_()
 
 
-# ================== RUN UPLOADING ============
-if uploaded_file and uploaded_file.name != st.session_state.file_name:
+# ================== RUN UPLOADING ==================
+if uploaded_file and uploaded_file.name != st.session_state.get("file_name"):
 
-    # RESET ENTIRELY AT EACH LOADING
-    for key in [
-       "df_model", "success_message_model", "file_name", "excel_file",
-        "sheets", "selected_sheet", "minesite_model", "equipment_model",
-        "df_missed", "df_browser_model"
-    ]:
-        st.session_state[key] = None
-    st.session_state.choice = "Operating"
+    # nouveau fichier = nettoyage complet
+    clear_processing_states()
 
-    init_state()
+    init_state_()
 
     file_name = uploaded_file.name.lower()
 
-    # ================= CSV =================
     if file_name.endswith(".csv"):
-        df_model = read_csv_file(uploaded_file)
-        st.session_state.df_model = df_model.copy()
 
-        st.session_state.success_message_model = "CSV file successfully loaded ✅"
-        
-        
-    # ================= EXCEL =================
+        df_model = read_csv_file(uploaded_file)
+        df_model = clean_for_streamlit(df_model)
+
+        st.session_state.df_model = df_model
+        st.session_state.success_message_model = (
+            "CSV file successfully loaded ✅"
+        )
+
     else:
         try:
-            excel_file, sheets = read_excel_file(uploaded_file)             
+            excel_file, sheets = read_excel_file(uploaded_file)
+
             st.session_state.excel_file = excel_file
             st.session_state.sheets = sheets
 
-            st.session_state.success_message_model = "Excel file successfully loaded ✅"         
-                              
+            st.session_state.success_message_model = (
+                "Excel file successfully loaded ✅"
+            )
+
         except Exception as e:
             st.error(f"Wrong file extension: {e}")
-    
+
     st.session_state.file_name = uploaded_file.name
 
 
 # ================= Display Success Message =================
-if st.session_state.success_message_model is not None:    
+if st.session_state.success_message_model is not None:
     st.success(st.session_state.success_message_model)
 
 
 # ==========================================================
-# EXCEL SHEET
+# EXCEL SHEET (OPTIMISÉ)
 # ==========================================================
-if st.session_state.sheets is not None:                
+if st.session_state.sheets is not None:
 
     left, right = st.columns(2)
     left.header(f"Sheets available = {len(st.session_state.sheets)}")
@@ -114,17 +257,21 @@ if st.session_state.sheets is not None:
     selected_sheet = right.selectbox(
         "Choose a sheet",
         st.session_state.sheets,
-        key= 'selected_sheet'
+        key='selected_sheet'
     )
-    
-    
+
     if selected_sheet:
-        df_model = pd.read_excel(
-            st.session_state.excel_file,
-            sheet_name= selected_sheet
-        )
-        st.session_state.df_model = df_model.copy()
-    
+        if "last_sheet" not in st.session_state or st.session_state.last_sheet != selected_sheet:
+            st.session_state.last_sheet = selected_sheet
+
+            df_model = pd.read_excel(
+                st.session_state.excel_file,
+                sheet_name=selected_sheet
+            )
+
+            df_model = clean_for_streamlit(df_model)
+            st.session_state.df_model = df_model
+
 
 # ==========================================================
 # DATA EDITING SECTION
@@ -133,20 +280,21 @@ if st.session_state.df_model is not None:
 
     df_model = st.session_state.df_model
 
-    # ================= Mine Site =================
-    minesite_model = st.selectbox("Select <site name>", site_list,
-                                  key= 'minesite_model', width= 400,
-                                  placeholder= 'Select mine site name')
+    minesite_model = st.selectbox(
+        "Select <site name>", site_list,
+        key='minesite_model', width=400,
+        placeholder='Select mine site name'
+    )
 
     if minesite_model:
 
-        BASE_DIR = os.getcwd()
-        
+        BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
         browser_path = os.path.join(
             BASE_DIR,
             "data",
             "Equipments",
-            f"{minesite_model}.csv"
+            "Equipment Browser_v3.csv"
         )
 
         if not os.path.exists(browser_path):
@@ -166,41 +314,39 @@ if st.session_state.df_model is not None:
                 "template",
                 "Template.xlsx"
             )
-        
+
         if "trainer_path_model" not in st.session_state:
             st.session_state.trainer_path_model = os.path.join(BASE_DIR, "data", "model")
-            
+
         st.subheader("🗳️ Editable Table")
 
-        # ================= AGGRID =================
         gb = GridOptionsBuilder.from_dataframe(df_model)
-        gb.configure_default_column(
-            editable=True,
-            filter=True,
-            sortable=True
-        )
+        gb.configure_default_column(editable=True, filter=True, sortable=True)
         gb.configure_selection("multiple")
 
         grid_options = gb.build()
 
         grid_response = AgGrid(
             df_model,
-            gridOptions= grid_options,
-            update_mode= GridUpdateMode.MODEL_CHANGED,
-            fit_columns_on_grid_load= True,
-            theme= "streamlit"
+            gridOptions=grid_options,
+            update_on="MODEL_CHANGED",  # inchangé
+            fit_columns_on_grid_load=True,
+            theme="streamlit"
         )
- 
-        edited_df_model = pd.DataFrame(grid_response["data"])
 
-        # Persist edited dataframe
+        edited_df_model = pd.DataFrame(grid_response["data"])
+        edited_df_model = clean_for_streamlit(edited_df_model)
+
         st.session_state.df_model = edited_df_model
 
-        # ================= Equipment Column =================
-        equipment_model = st.selectbox("Select <Equipment number column>",
-                                 edited_df_model.columns, key= 'equipment_model',
-                                 width= 500, placeholder= 'Select column that hold equipment identifier number')        
-        
+        equipment_model = st.selectbox(
+            "Select <Equipment number column>",
+            edited_df_model.columns,
+            key='equipment_model',
+            width=500,
+            placeholder='Select column that hold equipment identifier number'
+        )
+
         if equipment_model:
 
             if minesite_model == 'Essakane':
@@ -228,24 +374,19 @@ if st.session_state.df_model is not None:
             else:
                 st.success('✅ All equipments are include data.')
 
-            # ==================================================
-            # PROCESSING SECTION
-            # ==================================================
             st.subheader("✒️ PROCESS DATA")
 
             choice = st.radio(
                 "Choose processing type:",
                 ["Operating", "Downtime"],
                 horizontal=True,
-                key= 'choice'
+                key='choice'
             )
-            
+
             if st.button("➡️ Run"):
 
                 st.session_state.equipment = equipment_model
                 st.session_state.minesite = minesite_model
-                  
-                              
 
                 if st.session_state.choice == "Operating":
                     show_modal_operating()

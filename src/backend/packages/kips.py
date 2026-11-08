@@ -1,43 +1,64 @@
 # coding:utf-8
-
 import pandas as pd
-import numpy as np
 
 # ========================================
 # KPI'S CHECKING
 # ========================================
 def check_kpis_value(
-        df_op_hrs: pd.DataFrame,
-        df_downtime_hrs: pd.DataFrame,
-        month_hours= 744
+        df_op: pd.DataFrame,
+        df_down: pd.DataFrame
     ):
     """
         Checking whether sum of SMU hours and Downtime hours don't
         exceed 744 hours for the month
         params:
-            - df_op_hrs --> operating hours dataframe
-            - df_downtime_hrs --> downtime hours dataframe
-            - month_hours --> total hours in month
+            - df_op --> operating hours dataframe
+            - df_down --> downtime hours dataframe
         return:
             - dataframe
     """
 
-    df= df_op_hrs.copy()
-    df_ = df_downtime_hrs.copy()
-
-    df_ = df_.groupby('Equip No')['DowntimeHours'].sum()
-    df_ = df_.reset_index()
-    
-    df = df[['Equipment', 'Model', 'SMU Hours']]
-    df['DowntimeHours'] = df['Equipment'].map(df_.set_index(
-        df_['Equip No'])['DowntimeHours']
+    down = (
+        df_down.groupby(['Equip No', 'YearMonth', 'Model'], as_index=False, dropna=False)['DowntimeHours']
+        .sum()
     )
 
-    df['Rest hours'] = (
-        month_hours - (df['SMU Hours'] + df['DowntimeHours'])
+    op = (
+        df_op.groupby(['Equipment', 'YearMonth', 'Model'], as_index=False, dropna=False)['SMU Hours']
+        .sum()
     )
 
-    return df
+    df_merge = op.merge(
+        down,
+        left_on='Equipment',
+        right_on='Equip No',
+        how='outer'
+    )
+
+    df_merge['Equipment'] = df_merge['Equipment'].fillna(df_merge['Equip No'])
+    df_merge['YearMonth'] = df_merge['YearMonth_x'].fillna(df_merge['YearMonth_y'])
+    df_merge['Model'] = df_merge['Model_x'].fillna(df_merge['Model_y'])
+
+    df_merge = df_merge.drop(
+        columns=['Equip No', 'Model_x', 'Model_y']
+    )
+
+    df_merge[['SMU Hours', 'DowntimeHours']] = (
+        df_merge[['SMU Hours', 'DowntimeHours']]
+        .fillna(0)
+    )
+
+    # Réorganiser les colonnes
+    df_merge = df_merge[[
+        'Equipment', 'YearMonth', 'Model', 'DowntimeHours', 'SMU Hours']]
+
+    # Convertir en datetime (1er jour du mois)
+    df_merge['YearMonth'] = pd.to_datetime(df_merge['YearMonth'], format='%Y-%m')
+
+    df_merge['Used Hrs'] = df_merge['DowntimeHours'] + df_merge['SMU Hours']
+    df_merge['Calendar Hrs'] = df_merge['YearMonth'].dt.days_in_month * 24
+
+    return df_merge
 
 
 # ========================================

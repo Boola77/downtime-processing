@@ -1,21 +1,10 @@
 # coding:utf-8
-
 import pandas as pd
-from typing import TypedDict
-
-# ----------------- TypedDicts for error checks -----------------
-class DuplicateCheck(TypedDict):
-    subset: str | list[str]
-
-class OutlierCheck(TypedDict):
-    column: str
-    low: float
-    high: float
-
-class NaNCheck(TypedDict):
-    subset: str | list[str]
 
 
+# =======================================================
+# détecte des doublons "métier" avec NaN comme joker
+# =======================================================
 def detect_duplicates(
         df: pd.DataFrame,
         columns: str | list[str],
@@ -54,6 +43,9 @@ def detect_duplicates(
     return df.loc[dup_idx]
 
 
+# =======================================================
+# détecte les valeurs manquantes
+# =======================================================
 def detect_nans(
         df: pd.DataFrame,
         columns: str | list[str]
@@ -70,6 +62,9 @@ def detect_nans(
     return df[mask]
 
 
+# =======================================================
+# vérifie la cohérence durée = End - Start
+# =======================================================
 def downtime_hrs_mismatch(
         df: pd.DataFrame,
         tolerance_minutes: int = 10
@@ -93,18 +88,33 @@ def downtime_hrs_mismatch(
     return df[diff_minutes > tolerance_minutes]
 
 
-def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame: 
+# =======================================================
+# 
+# =======================================================
+def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
     """
-        Divide rows where Start Hours and End Hours are between
-        two different months.
+    Split intervals at every month boundary and at 06:30
+    immediately following each month boundary.
+
+    Preserve the original YearMonth until the 06:30 boundary.
+    Recalculate DowntimeHours for every generated segment.
     """
 
     df = df.copy()
 
-    df["Start Hours"] = pd.to_datetime(df["Start Hours"], errors="coerce")
-    df["End Hours"] = pd.to_datetime(df["End Hours"], errors="coerce")
+    # Dates au format jour/mois/année
+    df["Start Hours"] = pd.to_datetime(
+        df["Start Hours"], errors="coerce", dayfirst=True
+    )
+    df["End Hours"] = pd.to_datetime(
+        df["End Hours"], errors="coerce", dayfirst=True
+    )
 
-    year_month = df['YearMonth'].astype(str)
+    original_year_month = pd.to_datetime(
+        df["YearMonth"].astype(str),
+        errors="coerce",
+        dayfirst=True
+    )
 
     if len(year_month.unique()) == 1:
         month_start = pd.to_datetime(year_month.iloc[0])
@@ -113,8 +123,9 @@ def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
         # Over current month
         mask = df["End Hours"] > next_month
 
-        # Extract first and apply reset on Start Hours
-        df1 = df.loc[mask].copy()
+    # Conversion
+    df["Start Hours"] = pd.to_datetime(df["Start Hours"], errors="coerce")
+    year_month = pd.to_datetime(df["YearMonth"].astype(str), errors="coerce")
 
         # Focus on current month
         mask2 = df1['Start Hours'] < next_month
@@ -133,11 +144,18 @@ def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
             df.loc[mask, "End Hours"] - df.loc[mask, "Start Hours"]
         ).dt.total_seconds() / 3600
 
-        df = pd.concat([df, df1], ignore_index= True)
+    # Condition : different of both
+    mask = (start_month != ym) & (start_month != ym_plus_1)
 
-    return df
+    return (
+        df.loc[~mask].reset_index(drop=True),  # valid
+        df.loc[mask].reset_index(drop=True)    # unvalid
+    )
 
 
+# =======================================================
+# détecte des valeurs hors bornes
+# =======================================================
 def detect_outliers(
         df: pd.DataFrame,
         column: str,
@@ -150,3 +168,167 @@ def detect_outliers(
     
     mask = (df[column] < low_value) | (df[column] > high_value)
     return df[mask]
+
+
+# =======================================================
+# 
+# =======================================================
+def correct_imbricated_period(
+    df: pd.DataFrame,
+    subset_cols: list[str],
+    start_col: str = "Start Hours",
+    end_col: str = "End Hours"
+) -> pd.DataFrame:
+    """
+    Corrige les périodes imbriquées.
+
+    Règle :
+        - une intervention qui démarre plus tard est prioritaire.
+        - les anciennes sont raccourcies ou découpées.
+
+    Retourne un DataFrame sans chevauchement.
+    """
+
+    df = df.copy()
+    df["_modified"] = False
+
+    df[start_col] = pd.to_datetime(df[start_col])
+    df[end_col] = pd.to_datetime(df[end_col])
+
+    corrected = []
+
+    for _, group in df.groupby(subset_cols):
+
+        group = group.sort_values(start_col)
+
+        result = []
+
+        for _, current in group.iterrows():
+
+            current_start = current[start_col]
+            current_end = current[end_col]
+
+            new_result = []
+
+            overlap_found = False
+
+            for _, old in pd.DataFrame(result).iterrows() if len(result) else []:
+
+                old_start = old[start_col]
+                old_end = old[end_col]
+
+                # Aucun chevauchement
+                if old_end <= current_start or old_start >= current_end:
+                    new_result.append(old)
+                    continue
+
+                overlap_found = True
+
+                # Ancienne période avant la nouvelle
+                if old_start < current_start:
+                    left = old.copy()
+                    left[end_col] = current_start
+                    left["_modified"] = True
+
+                    if left[start_col] < left[end_col]:
+                        new_result.append(left)
+
+                # Ancienne période après la nouvelle
+                if old_end > current_end:
+                    right = old.copy()
+                    right[start_col] = current_end
+                    right["_modified"] = True
+
+                    if right[start_col] < right[end_col]:
+                        new_result.append(right)            
+                
+            current = current.copy()
+            current["_modified"] = overlap_found
+
+            new_result.append(current)
+
+            result = sorted(
+                new_result,
+                key=lambda x: x[start_col]
+            )
+
+        corrected.extend(result)
+
+    corrected = pd.DataFrame(corrected)
+
+    corrected = corrected.sort_values(
+        subset_cols + [start_col]
+    ).reset_index(drop=True)
+
+    # Recalcul de la durée en heures
+    mask = corrected["_modified"]
+
+    corrected.loc[mask, "DowntimeHours"] = (
+        (
+            corrected.loc[mask, end_col]
+            - corrected.loc[mask, start_col]
+        ).dt.total_seconds() / 3600
+    )
+    corrected = corrected.drop(columns="_modified")
+
+    return corrected
+
+
+# =======================================================
+# 
+# =======================================================
+def detect_imbricated_period(
+        df: pd.DataFrame,
+        subset_cols: list[str],
+        start_col: str = "Start Hours",
+        end_col: str = "End Hours"
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+        Split dataframe into:
+        - clean rows
+        - rows with duplicates (including time inclusion)
+
+        Duplicates are defined as:
+        - same values on subset_cols (excluding timestamps)
+        - AND identical or nested time intervals
+
+        Returns:
+            df_clean, df_anomalies
+    """
+ 
+    df = df.copy()
+
+    # Sécuriser les types datetime
+    df[start_col] = pd.to_datetime(df[start_col])
+    df[end_col] = pd.to_datetime(df[end_col])
+
+    group_cols = [col for col in subset_cols if col not in [start_col, end_col]]
+
+    rows_flagged = set()
+
+    for _, group in df.groupby(group_cols):
+        group = group.sort_values(start_col)
+        indices = group.index.tolist()
+
+        for i in range(len(indices)):
+            for j in range(i + 1, len(indices)):
+                idx_i = indices[i]
+                idx_j = indices[j]
+
+                start_i, end_i = df.loc[idx_i, [start_col, end_col]]
+                start_j, end_j = df.loc[idx_j, [start_col, end_col]]
+
+                # Inclusion ou égalité
+                overlap = (
+                    (start_i <= start_j and end_i >= end_j) or
+                    (start_j <= start_i and end_j >= end_i)
+                )
+
+                if overlap:
+                    rows_flagged.add(idx_i)
+                    rows_flagged.add(idx_j)
+
+    df_anomalies = df.loc[list(rows_flagged)].reset_index(drop=True)
+    df_clean = df.drop(index=rows_flagged).reset_index(drop=True)
+
+    return df_clean, df_anomalies
