@@ -68,5 +68,6 @@ def fetch_data(
             convert_to_datetime(df, ["Start Hours", "End Hours"]),
             subset_cols= ['Equip No']
         )
+        df = correct_shift_period(df)
 
     return df
