@@ -300,14 +300,9 @@ if st.session_state.df_model is not None:
         if not os.path.exists(browser_path):
             st.error(f"File not found: {browser_path}")
         else:
-            # ⚡ cached read
-            df_browser_model = load_browser(browser_path)
-
-        st.session_state.df_browser_model = df_browser_model[
-            df_browser_model.Minesite.fillna('')
-            .str.strip()
-            .str.lower() == minesite_model.strip().lower()
-        ].reset_index(drop=True)
+            df_browser_model = pd.read_csv(browser_path, sep=None, engine='python')
+        
+        st.session_state.df_browser_model = df_browser_model
 
         if "browser_path_model" not in st.session_state:
             st.session_state.browser_path_model = browser_path
@@ -354,32 +349,25 @@ if st.session_state.df_model is not None:
 
         if equipment_model:
 
-            st.session_state.df_browser_model = clean_for_streamlit(st.session_state.df_browser_model)
-            edited_df_model = clean_for_streamlit(edited_df_model)
+            if minesite_model == 'Essakane':
+                df_missed = df_browser_model[
+                    ~df_browser_model['Equipment'].isin(
+                        edited_df_model[equipment_model].unique())][[
+                            'Equip Label', 'Model', "SerialNumber", "Parent Product Family"
+                        ]].reset_index(drop=True)
+                if not df_missed.empty:
+                    st.session_state.df_missed = df_missed
 
-            # ⚡ recalcul seulement si colonne change
-            if "last_equipment" not in st.session_state or st.session_state.last_equipment != equipment_model:
-
-                st.session_state.last_equipment = equipment_model
-
-                # if minesite_model in ['Essakane', 'Goulamina/CORICA']:
-                df_missed = st.session_state.df_browser_model[
-                    ~st.session_state.df_browser_model['On Site Id'].isin(
-                        edited_df_model[equipment_model].unique())
-                ][['Equipment', 'On Site Id', "SerialNumber", 'Model', "Parent Product Family", "Status"]].reset_index(drop=True)
-
-                df_missed.rename(columns={'On Site Id': equipment_model}, inplace=True)
-
-                # else:
-                #     df_missed = st.session_state.df_browser_model[
-                #         ~st.session_state.df_browser_model['On Site Id'].isin(
-                #             edited_df_model[equipment_model].unique())
-                #     ][['Equipment', 'On Site Id', "SerialNumber", 'Model', "Parent Product Family", "Status"]].reset_index(drop=True)
-
-                #     df_missed.rename(columns={'On Site Id': equipment_model}, inplace=True)
-
-                st.session_state.df_missed = df_missed if not df_missed.empty else None
-
+            else:            
+                df_missed = df_browser_model[
+                    ~df_browser_model['Equipment'].isin(
+                        edited_df_model[equipment_model].unique())][[
+                            'Equipment', 'Model', "SerialNumber", "Parent Product Family"
+                        ]].reset_index(drop=True)
+                if not df_missed.empty:
+                    st.session_state.df_missed = df_missed            
+            
+            # 🔹 Show if only df_missed existes
             if st.session_state.df_missed is not None:
                 st.warning("⚠️ List of equipments not found in browser mapping")
                 st.dataframe(st.session_state.df_missed)
