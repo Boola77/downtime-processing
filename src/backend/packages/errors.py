@@ -459,7 +459,7 @@ def correct_shift_period(
 
             current += pd.Timedelta(days=1)
 
-        # Découpage à 07:00 le lendemain du changement de mois
+        # Découpage à 06:00 le lendemain du changement de mois
         current = start.normalize()
 
         while current < end:
@@ -469,7 +469,7 @@ def correct_shift_period(
             if next_day.month != current.month:
 
                 shift_boundary = (
-                    next_day + pd.Timedelta(hours=7)
+                    next_day + pd.Timedelta(hours=6)
                 )
 
                 if start < shift_boundary < end:
@@ -488,10 +488,10 @@ def correct_shift_period(
             new_row[start_col] = segment_start
             new_row[end_col] = segment_end
 
-            # La date du shift est celle du jour à 07:00
-            # Une heure avant 07:00 appartient au shift précédent
+            # La date du shift est celle du jour à 06:00
+            # Une heure avant 06:00 appartient au shift précédent
             shift_date = (
-                segment_start - pd.Timedelta(hours=7)
+                segment_start - pd.Timedelta(hours=6)
             ).normalize()
 
             if date_format:
