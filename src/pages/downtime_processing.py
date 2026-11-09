@@ -17,8 +17,8 @@ st.set_page_config(page_title="Downtime Hours")
 st.title("Downtime Data Processing")
 
 ERROR_ORDER = [
-    'missing_values', 'start_hours_mismatch',
-    'Downtime_imbricated_period', 'downtime_mismatch', 'duplicates'
+    'missing_values', 'Downtime_imbricated_period',
+    'downtime_mismatch', 'duplicates'
 ]
 
 # =====================================================

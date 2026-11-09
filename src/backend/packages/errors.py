@@ -433,7 +433,7 @@ def correct_shift_period(
     formats = df[yearmonth_col].dropna().astype(str)
 
     date_format = (
-        formats.str.len().mode().iloc[0] == 10
+        formats.str.len().mode().iloc[0] >= 10
     )
 
     corrected = []
@@ -558,7 +558,7 @@ def correct_yearmonth(
             continue
 
         # Start Shift DATE
-        shift_date = (start - pd.Timedelta(hours=7)).date()
+        shift_date = (start - pd.Timedelta(hours=6)).date()
 
         # Check if the labor crosses many month
         crosses_month = (
@@ -589,7 +589,7 @@ def correct_yearmonth(
         while current_day <= end.normalize():
 
             midnight = current_day
-            shift_change = current_day + pd.Timedelta(hours=7)
+            shift_change = current_day + pd.Timedelta(hours=6)
 
             for boundary in [midnight, shift_change]:
 
@@ -619,7 +619,7 @@ def correct_yearmonth(
             segment[end_col] = segment_end
 
             segment_shift_date = (
-                segment_start - pd.Timedelta(hours=7)
+                segment_start - pd.Timedelta(hours=6)
             ).date()
 
             segment[yearmonth_col] = get_yearmonth(
