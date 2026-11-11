@@ -147,7 +147,7 @@ def clean_for_streamlit(df):
 def load_browser(path):
     for enc in ["utf-8", "cp1252", "latin1"]:
         try:
-            return pd.read_csv(path, sep=None, engine="python", encoding=enc)
+            return pd.read_csv(path, sep=";", engine="python", encoding=enc)
         except UnicodeDecodeError:
             continue
     raise ValueError("Impossible de lire le CSV (encoding inconnu)")
