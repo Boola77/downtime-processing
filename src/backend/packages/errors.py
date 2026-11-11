@@ -104,53 +104,134 @@ def reset_exceed_end_time(df: pd.DataFrame) -> pd.DataFrame:
 
     # Dates au format jour/mois/année
     df["Start Hours"] = pd.to_datetime(
-        df["Start Hours"], errors="coerce", dayfirst=True
+        df["Start Hours"], errors="coerce", dayfirst=False
     )
     df["End Hours"] = pd.to_datetime(
-        df["End Hours"], errors="coerce", dayfirst=True
+        df["End Hours"], errors="coerce", dayfirst=False
     )
 
     original_year_month = pd.to_datetime(
         df["YearMonth"].astype(str),
         errors="coerce",
-        dayfirst=True
+        dayfirst=False
     )
 
-    if len(year_month.unique()) == 1:
-        month_start = pd.to_datetime(year_month.iloc[0])
-        next_month = month_start + pd.offsets.MonthBegin(1)
+    result = []
 
-        # Over current month
-        mask = df["End Hours"] > next_month
+    for pos in range(len(df)):
+        row = df.iloc[pos].copy()
 
-    # Conversion
-    df["Start Hours"] = pd.to_datetime(df["Start Hours"], errors="coerce")
-    year_month = pd.to_datetime(df["YearMonth"].astype(str), errors="coerce")
+        start = row["Start Hours"]
+        end = row["End Hours"]
+        reference = original_year_month.iloc[pos]
 
-        # Focus on current month
-        mask2 = df1['Start Hours'] < next_month
+        # Conserver les lignes invalides sans modification
+        if (
+            pd.isna(start)
+            or pd.isna(end)
+            or pd.isna(reference)
+            or end <= start
+        ):
+            result.append(row)
+            continue
 
-        df1 = df1.loc[mask2].copy()
-        
-        # On second part
-        df1["Start Hours"] = next_month
-        df1["DowntimeHours"] = (
-            df1["End Hours"] - df1["Start Hours"]
-        ).dt.total_seconds() / 3600
+        cursor = start
+        current_year_month = row["YearMonth"]
 
-        # on first part
-        df.loc[mask, "End Hours"] = next_month
-        df.loc[mask, "DowntimeHours"] = (
-            df.loc[mask, "End Hours"] - df.loc[mask, "Start Hours"]
-        ).dt.total_seconds() / 3600
+        def append_segment(segment_start, segment_end, year_month):
+            """Add a segment and recalculate its duration."""
+            if segment_end <= segment_start:
+                return
 
-    # Condition : different of both
-    mask = (start_month != ym) & (start_month != ym_plus_1)
+            segment = row.copy()
+            segment["Start Hours"] = segment_start
+            segment["End Hours"] = segment_end
+            segment["YearMonth"] = year_month
+            segment["DowntimeHours"] = (
+                segment_end - segment_start
+            ).total_seconds() / 3600
 
-    return (
-        df.loc[~mask].reset_index(drop=True),  # valid
-        df.loc[mask].reset_index(drop=True)    # unvalid
-    )
+            result.append(segment)
+
+        while cursor < end:
+
+            # Prochaine frontière mensuelle
+            month_boundary = (
+                cursor.to_period("M") + 1
+            ).start_time
+
+            # Si l'intervalle traverse la fin du mois
+            if cursor < month_boundary < end:
+
+                # 1. Segment jusqu'à minuit
+                append_segment(
+                    cursor,
+                    month_boundary,
+                    current_year_month
+                )
+
+                # 2. Frontière de changement d'équipe à 06:30
+                shift_boundary = (
+                    month_boundary
+                    + pd.Timedelta(hours=6, minutes=30)
+                )
+
+                if end <= shift_boundary:
+                    # L'intervalle s'arrête avant ou à 06:30
+                    append_segment(
+                        month_boundary,
+                        end,
+                        current_year_month
+                    )
+                    break
+
+                # Segment entre minuit et 06:30 :
+                # conserver le YearMonth précédent
+                append_segment(
+                    month_boundary,
+                    shift_boundary,
+                    current_year_month
+                )
+
+                # 3. Après 06:30, affecter la nouvelle date
+                cursor = shift_boundary
+                current_year_month = shift_boundary.normalize()
+
+            else:
+                # Aucun autre changement de mois avant la fin.
+                # Si l'intervalle commence exactement à minuit
+                # le premier jour d'un mois, appliquer aussi 06:30.
+                is_month_start = (
+                    cursor.day == 1
+                    and cursor == cursor.normalize()
+                )
+
+                if is_month_start:
+                    shift_boundary = (
+                        cursor + pd.Timedelta(
+                            hours=6, minutes=30
+                        )
+                    )
+
+                    if cursor < shift_boundary < end:
+                        append_segment(
+                            cursor,
+                            shift_boundary,
+                            current_year_month
+                        )
+
+                        cursor = shift_boundary
+                        current_year_month = cursor.normalize()
+                        continue
+
+                append_segment(
+                    cursor,
+                    end,
+                    current_year_month
+                )
+                break
+
+    return pd.DataFrame(result).reset_index(drop=True)
 
 
 # =======================================================
@@ -171,22 +252,22 @@ def detect_outliers(
 
 
 # =======================================================
-# 
+# Correction of overlapping Labor periods
 # =======================================================
 def correct_imbricated_period(
-    df: pd.DataFrame,
-    subset_cols: list[str],
-    start_col: str = "Start Hours",
-    end_col: str = "End Hours"
-) -> pd.DataFrame:
+        df: pd.DataFrame,
+        subset_cols: list[str],
+        start_col: str = "Start Hours",
+        end_col: str = "End Hours"
+    ) -> pd.DataFrame:
     """
-    Corrige les périodes imbriquées.
+    Correct overlapping time periods.
 
-    Règle :
-        - une intervention qui démarre plus tard est prioritaire.
-        - les anciennes sont raccourcies ou découpées.
+    Rule :
+        - An intervention that starts laters priority.
+        - Earlier interventions are shortened or split.
 
-    Retourne un DataFrame sans chevauchement.
+    Retourn a DataFrame with no overlaps.
     """
 
     df = df.copy()
@@ -275,7 +356,7 @@ def correct_imbricated_period(
 
 
 # =======================================================
-# 
+# Identification of overlapping Labor periods
 # =======================================================
 def detect_imbricated_period(
         df: pd.DataFrame,
@@ -332,3 +413,225 @@ def detect_imbricated_period(
     df_clean = df.drop(index=rows_flagged).reset_index(drop=True)
 
     return df_clean, df_anomalies
+
+
+
+def correct_shift_period(
+        df: pd.DataFrame,
+        start_col: str = "Start Hours",
+        end_col: str = "End Hours",
+        yearmonth_col: str = "YearMonth",
+        downtime_col: str = "DowntimeHours"
+    ) -> pd.DataFrame:
+
+    df = df.copy()
+
+    df[start_col] = pd.to_datetime(df[start_col])
+    df[end_col] = pd.to_datetime(df[end_col])
+
+    # Détection du format dominant de YearMonth
+    formats = df[yearmonth_col].dropna().astype(str)
+
+    date_format = (
+        formats.str.len().mode().iloc[0] >= 10
+    )
+
+    corrected = []
+
+    for _, row in df.iterrows():
+
+        start = row[start_col]
+        end = row[end_col]
+
+        if pd.isna(start) or pd.isna(end) or end <= start:
+            corrected.append(row.copy())
+            continue
+
+        boundaries = set()
+
+        # Découpage à minuit lors d'un changement de mois
+        current = start.normalize() + pd.Timedelta(days=1)
+
+        while current < end:
+
+            if current.month != (current - pd.Timedelta(days=1)).month:
+                boundaries.add(current)
+
+            current += pd.Timedelta(days=1)
+
+        # Découpage à 06:00 le lendemain du changement de mois
+        current = start.normalize()
+
+        while current < end:
+
+            next_day = current + pd.Timedelta(days=1)
+
+            if next_day.month != current.month:
+
+                shift_boundary = (
+                    next_day + pd.Timedelta(hours=6)
+                )
+
+                if start < shift_boundary < end:
+                    boundaries.add(shift_boundary)
+
+            current = next_day
+
+        points = [start] + sorted(boundaries) + [end]
+
+        for segment_start, segment_end in zip(
+            points[:-1], points[1:]
+        ):
+
+            new_row = row.copy()
+
+            new_row[start_col] = segment_start
+            new_row[end_col] = segment_end
+
+            # La date du shift est celle du jour à 06:00
+            # Une heure avant 06:00 appartient au shift précédent
+            shift_date = (
+                segment_start - pd.Timedelta(hours=6)
+            ).normalize()
+
+            if date_format:
+                new_row[yearmonth_col] = shift_date.strftime(
+                    "%Y-%m-%d"
+                )
+            else:
+                new_row[yearmonth_col] = shift_date.strftime(
+                    "%Y-%m"
+                )
+
+            new_row[downtime_col] = (
+                segment_end - segment_start
+            ).total_seconds() / 3600
+
+            corrected.append(new_row)
+
+    result = pd.DataFrame(corrected)
+
+    result = result.sort_values(
+        start_col
+    ).reset_index(drop=True)
+
+    return result
+
+# =======================================================
+# YearMonth of Labor
+# =======================================================
+def correct_yearmonth(
+        df: pd.DataFrame,
+        yearmonth_col: str ="YearMonth",
+        start_col: str = "Start Hours",
+        end_col: str = "End Hours",
+        duration_col: str = "DowntimeHours"
+    ) -> pd.DataFrame:
+
+    df = df.copy()
+
+    df[start_col] = pd.to_datetime(df[start_col])
+    df[end_col] = pd.to_datetime(df[end_col])
+
+    # Detection of the dominant format
+    values = df[yearmonth_col].dropna().astype(str)
+
+    daily_count = values.str.match(
+        r"^\d{4}-\d{2}-\d{2}$"
+    ).sum()
+
+    monthly_count = values.str.match(
+        r"^\d{4}-\d{2}$"
+    ).sum()
+
+    daily_format = daily_count > monthly_count
+
+    corrected = []
+
+    for _, row in df.iterrows():
+
+        start = row[start_col]
+        end = row[end_col]
+
+        if pd.isna(start) or pd.isna(end) or end <= start:
+            corrected.append(row)
+            continue
+
+        # Start Shift DATE
+        shift_date = (start - pd.Timedelta(hours=6)).date()
+
+        # Check if the labor crosses many month
+        crosses_month = (
+            start.year != end.year
+            or start.month != end.month
+        )
+
+        # Funtion to determine YearMonth
+        def get_yearmonth(date):
+            if daily_format:
+                return pd.Timestamp(date).strftime("%Y-%m-%d")
+            return pd.Timestamp(date).strftime("%Y-%m")
+        
+        # Case 1: same month -> no split
+        if not crosses_month:
+
+            row = row.copy()
+            row[yearmonth_col] = get_yearmonth(shift_date)
+
+            corrected.append(row)
+            continue
+
+        # Case 2: Many months -> Split
+        boundaries = []
+
+        current_day = start.normalize()
+
+        while current_day <= end.normalize():
+
+            midnight = current_day
+            shift_change = current_day + pd.Timedelta(hours=6)
+
+            for boundary in [midnight, shift_change]:
+
+                if start < boundary < end:
+
+                    # Split if only the frontier is month changing
+                    before = boundary - pd.Timedelta(nanoseconds=1)
+
+                    if (
+                        before.year != boundary.year
+                        or before.month != boundary.month
+                    ):
+                        boundaries.append(boundary)
+
+            current_day += pd.Timedelta(days=1)
+
+        points = [start] + sorted(set(boundaries)) + [end]
+
+        for i in range(len(points) - 1):
+
+            segment_start = points[i]
+            segment_end = points[i + 1]
+
+            segment = row.copy()
+
+            segment[start_col] = segment_start
+            segment[end_col] = segment_end
+
+            segment_shift_date = (
+                segment_start - pd.Timedelta(hours=6)
+            ).date()
+
+            segment[yearmonth_col] = get_yearmonth(
+                segment_shift_date
+            )
+
+            segment[duration_col] = (
+                segment_end - segment_start
+            ).total_seconds() / 3600
+
+            corrected.append(segment)
+
+    result = pd.DataFrame(corrected)
+
+    return result.reset_index(drop=True)

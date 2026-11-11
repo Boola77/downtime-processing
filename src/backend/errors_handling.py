@@ -76,8 +76,6 @@ def errors_handling(
         errors["downtime_mismatch"] = mismatch.reset_index(drop=True)
 
         df = reset_exceed_end_time(df)
-
-        df, errors["start_hours_mismatch"] = get_invalid_start_month_rows(df)
  
         df, errors['Downtime_imbricated_period'] = detect_imbricated_period(
             df,
